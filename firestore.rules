@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Events collection - public read, authenticated write
+    match /events/{eventId} {
+      allow read: if true;
+      allow write: if true; // For now, allow public write (can restrict later)
+    }
+    
+    // Polls collection - public read/write for submissions
+    match /polls/{pollId} {
+      allow read: if true;
+      allow write: if true; // For now, allow public write (can restrict later)
+    }
+    
+    // Q&A collection - public read/write
+    match /qa/{qaId} {
+      allow read: if true;
+      allow write: if true; // For now, allow public write (can restrict later)
+      
+      // Q&A submissions subcollection - public read/write
+      match /submissions/{submissionId} {
+        allow read: if true;
+        allow create: if true; // Allow public to submit Q&A answers
+        allow update, delete: if false; // Prevent editing/deleting submissions
+      }
+    }
+  }
+}
+
