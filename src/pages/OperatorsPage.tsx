@@ -642,27 +642,32 @@ export default function OperatorsPage() {
       // Find the parent Q&A session to get outputSettings
       const parentSession = qas.find(qa => qa.eventId === questionToActivate.eventId && qa.name && !qa.question);
       
-      // Copy outputSettings from parent session if question doesn't have them
+      // Copy outputSettings from parent session if question doesn't have them; default to output 1 so preview shows
       const updates: any = {
         isQueued: false,
         isActive: true,
       };
-      
-      if (parentSession?.outputSettings && !questionToActivate.outputSettings) {
+      if (parentSession?.outputSettings && Object.keys(parentSession.outputSettings).length > 0) {
         updates.outputSettings = parentSession.outputSettings;
+      } else if (!questionToActivate.outputSettings || Object.keys(questionToActivate.outputSettings || {}).length === 0) {
+        updates.outputSettings = { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
       }
 
       // Update Cue question to Active
       await updateQA(questionId, updates);
 
       // Optimistically update local state
+      const activeQuestion = { ...questionToActivate, isActive: true, isQueued: false, ...updates };
       setQAQuestions((prev) =>
         prev.map((q) =>
-          q.id === questionId ? { ...q, isActive: true, isQueued: false, ...updates } : { ...q, isActive: false }
+          q.id === questionId ? activeQuestion : { ...q, isActive: false }
         )
       );
 
-      // Write live state to Firestore immediately (same data as Download CSV / Railway link)
+      // Show in preview/outputs immediately (same as Download CSV)
+      setActiveQA(activeQuestion);
+
+      // Write live state to Firestore immediately (Railway CSV / Sheets)
       if (selectedEventId && selectedEvent) {
         setLiveState(selectedEventId, {
           activePoll: activePoll
@@ -686,11 +691,15 @@ export default function OperatorsPage() {
         }).catch((err: unknown) => console.warn('Live state write failed:', err));
       }
 
-      // Reload Q&A questions to sync with server
+      // Reload Q&A questions but keep the one we just played as active (refetch can return stale)
       if (selectedEventId) {
         const eventQAs = await getQAsByEvent(selectedEventId);
         const qaSubmissions = eventQAs.filter(qa => qa.question && !qa.name);
-        setQAQuestions(qaSubmissions);
+        setQAQuestions((prev) =>
+          qaSubmissions.map((q) =>
+            q.id === questionId ? { ...q, isActive: true, isQueued: false } : { ...q, isActive: false }
+          )
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to activate question');
@@ -701,9 +710,10 @@ export default function OperatorsPage() {
   // Handle Stop button for individual questions (Active -> Done, then promote Next to Cue)
   const handleStopQuestion = async (questionId: string) => {
     try {
-      // Animate out first
+      // Clear preview and active QA immediately so one click is enough
+      setActiveQA(null);
       setPreviewVisible(false);
-      
+
       setTimeout(async () => {
         // Update Active question to Done
         await updateQA(questionId, {

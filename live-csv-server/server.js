@@ -88,7 +88,9 @@ app.get('/live-qa-csv', async (req, res) => {
     const csv = '\uFEFF' + rows.join('\r\n');
     res.status(200)
       .set('Content-Type', 'text/csv; charset=utf-8')
-      .set('Content-Disposition', 'inline') // so browser may show instead of download; Sheets ignores this
+      .set('Content-Disposition', 'inline')
+      .set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+      .set('Pragma', 'no-cache')
       .send(csv);
   } catch (err) {
     res.status(500).set('Content-Type', 'text/plain').send(err?.message || 'Error');
