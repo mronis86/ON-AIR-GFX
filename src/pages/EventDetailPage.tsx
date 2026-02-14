@@ -46,8 +46,10 @@ export default function EventDetailPage() {
   const [scriptVariant, setScriptVariant] = useState<'webapp' | 'firestore' | 'firestore_simple' | 'railway'>('railway');
   const [railwayBaseUrl, setRailwayBaseUrl] = useState('');
   const railwayBaseUrlClean = railwayBaseUrl.trim().replace(/\/+$/, '');
-  const railwayLiveCsvUrl = eventId && railwayBaseUrlClean ? `${railwayBaseUrlClean}/live-qa-csv?eventId=${encodeURIComponent(eventId)}` : '';
-  const railwayImportDataFormula = railwayLiveCsvUrl ? `=IMPORTDATA("${railwayLiveCsvUrl}")` : '';
+  const railwayLiveQaCsvUrl = eventId && railwayBaseUrlClean ? `${railwayBaseUrlClean}/live-qa-csv?eventId=${encodeURIComponent(eventId)}` : '';
+  const railwayLivePollCsvUrl = eventId && railwayBaseUrlClean ? `${railwayBaseUrlClean}/live-poll-csv?eventId=${encodeURIComponent(eventId)}` : '';
+  const railwayImportDataFormula = railwayLiveQaCsvUrl ? `=IMPORTDATA("${railwayLiveQaCsvUrl}")` : '';
+  const railwayPollImportDataFormula = railwayLivePollCsvUrl ? `=IMPORTDATA("${railwayLivePollCsvUrl}")` : '';
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [sheetSaveSuccess, setSheetSaveSuccess] = useState(false);
 
@@ -558,26 +560,53 @@ export default function EventDetailPage() {
                         <p className="text-xs text-gray-500 mt-1">Paste your Railway app URL (from Railway dashboard → Domains). Save above to persist.</p>
                       </div>
                       {railwayImportDataFormula && (
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs text-gray-600">Formula (paste in a cell):</span>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(railwayImportDataFormula);
-                                  setCopyFeedback('script');
-                                  setTimeout(() => setCopyFeedback(null), 2000);
-                                } catch (_) { setSheetError('Copy failed.'); }
-                              }}
-                              className="text-xs px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
-                            >
-                              {copyFeedback === 'script' ? 'Copied!' : 'Copy formula'}
-                            </button>
+                        <div className="space-y-4">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-medium text-gray-700">Q&A formula:</span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(railwayImportDataFormula);
+                                    setCopyFeedback('script');
+                                    setTimeout(() => setCopyFeedback(null), 2000);
+                                  } catch (_) { setSheetError('Copy failed.'); }
+                                }}
+                                className="text-xs px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                              >
+                                {copyFeedback === 'script' ? 'Copied!' : 'Copy Q&A formula'}
+                              </button>
+                            </div>
+                            <pre className="p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto font-mono whitespace-pre-wrap break-all mt-1">
+                              {railwayImportDataFormula}
+                            </pre>
+                            <p className="text-xs text-gray-500 mt-1">ACTIVE, Cue, Next columns. Enable via CSV button on Operators page.</p>
                           </div>
-                          <pre className="p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto font-mono whitespace-pre-wrap break-all mt-1">
-                            {railwayImportDataFormula}
-                          </pre>
+                          {railwayPollImportDataFormula && (
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-medium text-gray-700">Poll formula:</span>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await navigator.clipboard.writeText(railwayPollImportDataFormula);
+                                      setCopyFeedback('script');
+                                      setTimeout(() => setCopyFeedback(null), 2000);
+                                    } catch (_) { setSheetError('Copy failed.'); }
+                                  }}
+                                  className="text-xs px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                                >
+                                  {copyFeedback === 'script' ? 'Copied!' : 'Copy Poll formula'}
+                                </button>
+                              </div>
+                              <pre className="p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto font-mono whitespace-pre-wrap break-all mt-1">
+                                {railwayPollImportDataFormula}
+                              </pre>
+                              <p className="text-xs text-gray-500 mt-1">Title, options, votes. Enable via CSV button on Operators page.</p>
+                            </div>
+                          )}
                           <p className="text-xs text-gray-500">Sheets refreshes periodically. See docs/Railway-Deploy-Step-by-Step.md.</p>
                         </div>
                       )}

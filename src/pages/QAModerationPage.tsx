@@ -18,6 +18,8 @@ export default function QAModerationPage() {
   const [showAllQuestionsModal, setShowAllQuestionsModal] = useState(false);
   const [allQuestions, setAllQuestions] = useState<QandA[]>([]);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
+  const [sessions, setSessions] = useState<QandA[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!eventId) return;
@@ -117,8 +119,10 @@ export default function QAModerationPage() {
       const eventData = await getEvent(eventId);
       setEvent(eventData);
 
-      // Load ALL questions (submissions only, not session containers)
       const allQAs = await getQAsByEvent(eventId);
+      const sessionList = allQAs.filter(qa => qa.name && !qa.question);
+      setSessions(sessionList);
+
       const submissions = allQAs.filter(qa => qa.question && !qa.name); // Only submissions, not session containers
 
       // For pending tab: show ALL questions (pending, approved, rejected)
@@ -300,14 +304,20 @@ export default function QAModerationPage() {
 
   const handleQueue = async (qaId: string) => {
     try {
-      // Update local state immediately for instant feedback
       const qa = pendingQAs.find(q => q.id === qaId) || approvedQAs.find(q => q.id === qaId);
       if (!qa) return;
+      // Active questions can only go to Done (via Stop); don't allow queueing them
+      if (qa.isActive) {
+        setError('Active questions can only be completed via Stop. Use Operators to stop the active question.');
+        return;
+      }
 
-      // Update pending list
+      // Update local state immediately for instant feedback
       setPendingQAs(prev => prev.map(q => {
         if (q.id === qaId) {
           return { ...q, isQueued: true, isNext: false, status: q.status !== 'approved' ? 'approved' as QAStatus : q.status };
+        } else if (q.isActive) {
+          return q;
         } else if (q.isQueued) {
           return { ...q, isQueued: false, isNext: true };
         } else if (!q.isNext && q.status === 'approved') {
@@ -320,6 +330,8 @@ export default function QAModerationPage() {
       setApprovedQAs(prev => prev.map(q => {
         if (q.id === qaId) {
           return { ...q, isQueued: true, isNext: false };
+        } else if (q.isActive) {
+          return q;
         } else if (q.isQueued) {
           return { ...q, isQueued: false, isNext: true };
         } else if (!q.isNext) {
@@ -349,6 +361,9 @@ export default function QAModerationPage() {
           }
           
           updates.push(updateQA(qaId, updateData));
+        } else if (q.isActive) {
+          // Active questions can only go to Done; never set isNext on them
+          continue;
         } else if (q.isQueued) {
           updates.push(updateQA(q.id, { isQueued: false, isNext: true }));
         } else if (!q.isNext && q.status === 'approved') {
@@ -392,11 +407,15 @@ export default function QAModerationPage() {
 
   const handleSetNext = async (qaId: string) => {
     try {
-      // Update local state immediately for instant feedback
       const qa = pendingQAs.find(q => q.id === qaId) || approvedQAs.find(q => q.id === qaId);
       if (!qa) return;
+      // Active questions can only go to Done (via Stop); never revert to Next
+      if (qa.isActive) {
+        setError('Active questions can only be completed via Stop. Use Operators to stop the active question.');
+        return;
+      }
 
-      // Update pending list
+      // Update local state immediately for instant feedback
       setPendingQAs(prev => prev.map(q => {
         if (q.id === qaId) {
           return { ...q, isNext: true, isQueued: false };
@@ -509,18 +528,41 @@ export default function QAModerationPage() {
     );
   }
 
-  const currentQAs = activeTab === 'pending' ? pendingQAs : approvedQAs;
+  // Filter by selected session
+  const filterBySession = (list: QandA[]) =>
+    selectedSessionId
+      ? list.filter(q => q.sessionId === selectedSessionId)
+      : list;
+  const filteredPending = filterBySession(pendingQAs);
+  const filteredApproved = filterBySession(approvedQAs);
+  const currentQAs = activeTab === 'pending' ? filteredPending : filteredApproved;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       {/* Header */}
       <div className="bg-gray-800 border-b border-gray-700 px-6 py-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">{event?.name || 'Q&A Moderation'}</h1>
             <p className="text-gray-400 text-sm mt-1">Manage and moderate questions</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label htmlFor="session-filter" className="text-sm text-gray-400">Session:</label>
+              <select
+                id="session-filter"
+                value={selectedSessionId ?? ''}
+                onChange={(e) => setSelectedSessionId(e.target.value || null)}
+                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm min-w-[180px]"
+              >
+                <option value="">All sessions</option>
+                {sessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name || 'Untitled session'}
+                  </option>
+                ))}
+              </select>
+            </div>
             <button
               onClick={() => {
                 setShowAllQuestionsModal(true);
@@ -560,13 +602,13 @@ export default function QAModerationPage() {
                       : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
                   }`}
                 >
-                  Pending ({pendingQAs.length})
+                  Pending ({filteredPending.length})
                 </button>
                 <button
                   onClick={() => setActiveTab('approved')}
                   className="flex-1 px-4 py-3 font-medium transition-colors bg-gray-800 text-gray-300 hover:bg-gray-700"
                 >
-                  Approved ({approvedQAs.length})
+                  Approved ({filteredApproved.length})
                 </button>
               </div>
 
@@ -653,7 +695,7 @@ export default function QAModerationPage() {
                 onClick={() => setActiveTab('pending')}
                 className="px-6 py-3 font-medium transition-colors bg-gray-800 text-gray-300 hover:bg-gray-700"
               >
-                Pending ({pendingQAs.length})
+                Pending ({filteredPending.length})
               </button>
               <button
                 onClick={() => setActiveTab('approved')}
@@ -663,7 +705,7 @@ export default function QAModerationPage() {
                     : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
                 }`}
               >
-                Approved ({approvedQAs.length})
+                Approved ({filteredApproved.length})
               </button>
             </div>
 
@@ -712,22 +754,28 @@ export default function QAModerationPage() {
                               <span className="px-2 py-1 bg-green-600 text-white text-xs rounded">Active</span>
                             )}
                           </div>
-                          {/* Queue Button */}
+                          {/* Queue Button - disabled for active (can only go to Done via Stop) */}
                           <button
-                            onClick={() => handleQueue(qa.id)}
+                            onClick={() => !qa.isActive && handleQueue(qa.id)}
+                            disabled={qa.isActive}
                             className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-                              qa.isQueued
+                              qa.isActive
+                                ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                                : qa.isQueued
                                 ? 'bg-orange-600 hover:bg-orange-700'
                                 : 'bg-gray-700 hover:bg-gray-600'
                             }`}
                           >
                             {qa.isQueued ? 'Cue' : 'Cue'}
                           </button>
-                          {/* Next Button */}
+                          {/* Next Button - disabled for active (can only go to Done via Stop) */}
                           <button
-                            onClick={() => handleSetNext(qa.id)}
+                            onClick={() => !qa.isActive && handleSetNext(qa.id)}
+                            disabled={qa.isActive}
                             className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-                              qa.isNext
+                              qa.isActive
+                                ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                                : qa.isNext
                                 ? 'bg-purple-600 hover:bg-purple-700'
                                 : 'bg-gray-700 hover:bg-gray-600'
                             }`}
@@ -835,9 +883,12 @@ export default function QAModerationPage() {
                       </div>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => handleQueue(selectedQA.id)}
+                          onClick={() => !selectedQA.isActive && handleQueue(selectedQA.id)}
+                          disabled={selectedQA.isActive}
                           className={`flex-1 px-4 py-2 rounded-lg transition-colors font-medium ${
-                            selectedQA.isQueued
+                            selectedQA.isActive
+                              ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                              : selectedQA.isQueued
                               ? 'bg-orange-600 hover:bg-orange-700'
                               : 'bg-gray-700 hover:bg-gray-600'
                           }`}
@@ -845,9 +896,12 @@ export default function QAModerationPage() {
                           {selectedQA.isQueued ? 'Cue' : 'Cue'}
                         </button>
                         <button
-                          onClick={() => handleSetNext(selectedQA.id)}
+                          onClick={() => !selectedQA.isActive && handleSetNext(selectedQA.id)}
+                          disabled={selectedQA.isActive}
                           className={`flex-1 px-4 py-2 rounded-lg transition-colors font-medium ${
-                            selectedQA.isNext
+                            selectedQA.isActive
+                              ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                              : selectedQA.isNext
                               ? 'bg-purple-600 hover:bg-purple-700'
                               : 'bg-gray-700 hover:bg-gray-600'
                           }`}
@@ -943,9 +997,12 @@ export default function QAModerationPage() {
                       Edit
                     </button>
                     <button
-                      onClick={() => handleSetNext(selectedQA.id)}
+                      onClick={() => !selectedQA.isActive && handleSetNext(selectedQA.id)}
+                      disabled={selectedQA.isActive}
                       className={`px-4 py-2 rounded-lg transition-colors ${
-                        selectedQA.isNext
+                        selectedQA.isActive
+                          ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                          : selectedQA.isNext
                           ? 'bg-blue-600 hover:bg-blue-700'
                           : 'bg-gray-700 hover:bg-gray-600'
                       }`}

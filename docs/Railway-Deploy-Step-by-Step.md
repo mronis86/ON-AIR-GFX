@@ -71,12 +71,18 @@ The repo has both the main app and the `live-csv-server` folder. Railway must bu
 
 ---
 
-## 7. Test the CSV endpoint
+## 7. Test the CSV endpoints
 
 In a browser or Postman, open:
 
+**Q&A CSV:**
 ```text
 https://YOUR_RAILWAY_URL/live-qa-csv?eventId=YOUR_EVENT_ID
+```
+
+**Poll CSV:**
+```text
+https://YOUR_RAILWAY_URL/live-poll-csv?eventId=YOUR_EVENT_ID
 ```
 
 Replace:
@@ -84,21 +90,24 @@ Replace:
 - `YOUR_RAILWAY_URL` with the URL from step 6 (no trailing slash).
 - `YOUR_EVENT_ID` with a real event ID from your ON-AIR GFX app.
 
-You should see a small CSV (header row + one data row). If you get an error, check that the env vars are set and that the event ID exists in Firestore.
+For Q&A: enable a session via the **CSV** button on the Operators page. For Poll: enable a poll via the **CSV** button on the Operators page. You should see a small CSV. If you get an error, check that the env vars are set and that the event ID exists in Firestore.
 
 ---
 
-## 8. Use the URL in Google Sheets
+## 8. Use the URLs in Google Sheets
 
-1. In **Google Sheets**, open (or create) the sheet where you want live Q&A.
-2. In a cell, enter:
-
+1. In **Google Sheets**, open (or create) the sheet where you want live data.
+2. **Q&A** (ACTIVE, Cue, Next): In a cell, enter:
    ```text
    =IMPORTDATA("https://YOUR_RAILWAY_URL/live-qa-csv?eventId=YOUR_EVENT_ID")
    ```
-
-   Replace `YOUR_RAILWAY_URL` and `YOUR_EVENT_ID` with the same values as in step 7.
-3. Press Enter. Sheets will fetch the CSV and refresh it periodically (e.g. every hour). No script, no authorization.
+   Enable via **CSV** button on a Q&A session in Operators.
+3. **Poll** (title, options, votes): In a cell, enter:
+   ```text
+   =IMPORTDATA("https://YOUR_RAILWAY_URL/live-poll-csv?eventId=YOUR_EVENT_ID")
+   ```
+   Enable via **CSV** button on a poll in Operators.
+4. Replace `YOUR_RAILWAY_URL` and `YOUR_EVENT_ID` with your values. Press Enter. Sheets will fetch the CSV and refresh it periodically (e.g. every hour). No script, no authorization.
 
 ---
 

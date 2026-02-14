@@ -66,6 +66,7 @@ export default function PollFormEnhanced({ eventId, poll, onSuccess, onCancel }:
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [showPositionOverlay, setShowPositionOverlay] = useState(false);
 
   // Update form state when poll prop changes (for editing)
   useEffect(() => {
@@ -1744,8 +1745,39 @@ export default function PollFormEnhanced({ eventId, poll, onSuccess, onCancel }:
 
         {/* Preview - 16:9 Screen - Show only selected layout (matches FullscreenOutputPage exactly) */}
         {showPreview && (
-          <div className="border-t pt-6 mt-6">
-            <h3 className="text-lg font-semibold mb-4">Preview (16:9 Broadcast Screen)</h3>
+          <div className="border-t pt-6 mt-6 relative">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Preview (16:9 Broadcast Screen)</h3>
+              <button
+                type="button"
+                onClick={() => setShowPositionOverlay((v) => !v)}
+                className="px-2 py-1 text-xs font-mono bg-gray-200 text-gray-700 border border-gray-400 rounded hover:bg-gray-300"
+                title="Toggle position overlay"
+              >
+                {showPositionOverlay ? 'Hide pos' : 'Pos'}
+              </button>
+            </div>
+            {showPositionOverlay && (
+              <div className="mb-4 font-mono text-xs text-gray-700 bg-gray-100 border border-gray-300 rounded p-3 max-w-md">
+                <div className="font-bold text-gray-800 mb-2">Position & scale (Event Preview)</div>
+                <div className="space-y-1">
+                  <div>Viewport: {typeof window !== 'undefined' ? `${window.innerWidth} × ${window.innerHeight}` : '-'}</div>
+                  <div>Canvas: 960 × 540 (fixed)</div>
+                  <div>Layout: {layoutStyle} (1=Full, 2=Lower Third, 3=PIP)</div>
+                  {layoutStyle === 3 && (
+                    <>
+                      <div className="mt-2 text-gray-600">PIP box:</div>
+                      <div>top: 24px · side: 24px · w-96: 384px</div>
+                      <div>max-w: 35vw = {typeof window !== 'undefined' ? Math.round(window.innerWidth * 0.35) : '-'}px</div>
+                      <div>maxH: 70vh = {typeof window !== 'undefined' ? Math.round(window.innerHeight * 0.7) : '-'}px</div>
+                    </>
+                  )}
+                  {layoutStyle === 2 && (
+                    <div className="mt-2 text-gray-600">Lower Third: bottom strip, p-6</div>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="mx-auto" style={{ width: '960px' }}>
               {layoutStyle === 1 ? (
                 /* Full Screen Layout - matches FullscreenOutputPage */

@@ -6,7 +6,7 @@ import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
 import { getAnimationClasses, getTransitionInClass, afterDelayThenPaint, saveAnimationSettings, getAnimationSettings } from '../utils/animations';
 import { postToWebApp } from '../services/googleSheets';
-import { buildLiveQaCsv6, downloadCsv } from '../utils/liveDataCsv';
+import { buildLiveQaCsv6, buildPollCsv, downloadCsv } from '../utils/liveDataCsv';
 
 const OPERATOR_PASSWORD = '1615';
 
@@ -75,8 +75,10 @@ export default function OperatorsPage() {
   const [backgroundAnimateFirst, setBackgroundAnimateFirst] = useState(initialAnimationSettings.backgroundAnimateFirst);
   const [qaAnimateInDelayMs, setQAAnimateInDelayMs] = useState(initialAnimationSettings.qaAnimateInDelayMs ?? 100);
   const [showOutputOptions, setShowOutputOptions] = useState(false);
+  const [showDownloadCsvModal, setShowDownloadCsvModal] = useState(false);
   const [expandedPollId, setExpandedPollId] = useState<string | null>(null);
   const [csvSourceSessionId, setCsvSourceSessionId] = useState<string | null>(null);
+  const [csvSourcePollId, setCsvSourcePollId] = useState<string | null>(null);
   const [expandedQAId, setExpandedQAId] = useState<string | null>(null);
   const [previewOutput, setPreviewOutput] = useState<number>(1); // Output 1-4 for preview
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0); // Increment to force iframe reload
@@ -312,6 +314,7 @@ export default function OperatorsPage() {
           }
         : null,
       csvSourceSessionId: csvSourceSessionId ?? undefined,
+      csvSourcePollId: csvSourcePollId ?? undefined,
       pollSheetName: activePoll?.googleSheetTab?.trim() || undefined,
       qaSheetName: selectedEvent?.activeQASheetName?.trim() || undefined,
       qaCell: selectedEvent?.activeQACell?.trim() || undefined,
@@ -324,6 +327,7 @@ export default function OperatorsPage() {
     selectedEvent?.activeQASheetName,
     selectedEvent?.activeQACell,
     csvSourceSessionId,
+    csvSourcePollId,
     activePoll?.id,
     activePoll?.title,
     activePoll?.type,
@@ -553,6 +557,7 @@ export default function OperatorsPage() {
 
       const liveState = await getLiveState(eventId);
       setCsvSourceSessionId(liveState?.csvSourceSessionId ?? null);
+      setCsvSourcePollId(liveState?.csvSourcePollId ?? null);
       
       // Find active poll for preview
       const active = eventPolls.find((p) => p.isActive);
@@ -685,6 +690,19 @@ export default function OperatorsPage() {
     } catch (err) {
       setCsvSourceSessionId(csvSourceSessionId);
       setError(err instanceof Error ? err.message : 'Failed to set CSV source');
+    }
+  };
+
+  const handleSetCSVPollSource = async (pollId: string) => {
+    if (!selectedEventId) return;
+    const isAlready = csvSourcePollId === pollId;
+    const next = isAlready ? null : pollId;
+    setCsvSourcePollId(next);
+    try {
+      await setLiveState(selectedEventId, { csvSourcePollId: next });
+    } catch (err) {
+      setCsvSourcePollId(csvSourcePollId);
+      setError(err instanceof Error ? err.message : 'Failed to set Poll CSV source');
     }
   };
 
@@ -1085,9 +1103,10 @@ export default function OperatorsPage() {
     return () => window.removeEventListener('message', handleMessage);
   }, [selectedEventId, activePoll?.id, editingPollId]);
 
-  // Preview popup drag handlers
+  // Preview popup drag handlers - allow drag when clicking header (not on buttons)
   const handleMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).classList.contains('preview-drag-handle')) {
+    const target = e.target as HTMLElement;
+    if (target.closest('.preview-drag-handle') && !target.closest('button')) {
       setIsDragging(true);
       setDragStart({ x: e.clientX - previewPosition.x, y: e.clientY - previewPosition.y });
     }
@@ -1263,22 +1282,9 @@ export default function OperatorsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    const sessionQuestions = csvSourceSessionId
-                      ? qaQuestions.filter((q) => q.sessionId === csvSourceSessionId)
-                      : qaQuestions;
-                    const active = sessionQuestions.find((q) => q.isActive) ?? null;
-                    const cue = sessionQuestions.find((q) => q.isQueued) ?? null;
-                    const next = sessionQuestions.find((q) => q.isNext) ?? null;
-                    const csv = buildLiveQaCsv6({
-                      active: active ? { question: active.question ?? '', submitterName: active.submitterName } : null,
-                      cue: cue ? { question: cue.question ?? '', submitterName: cue.submitterName } : null,
-                      next: next ? { question: next.question ?? '', submitterName: next.submitterName } : null,
-                    });
-                    downloadCsv(`live-qa-${selectedEventId}.csv`, csv);
-                  }}
+                  onClick={() => setShowDownloadCsvModal(true)}
                   className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2"
-                  title="Download CSV (Question ACTIVE, Name ACTIVE, Question Cue, Name Cue, Question Next, Name Next)"
+                  title="Download Q&A or Poll data as CSV (separate from Railway live CSV)"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1311,6 +1317,98 @@ export default function OperatorsPage() {
           </div>
         </div>
       </div>
+
+      {/* Download CSV Modal - high z-index to appear above all */}
+      {showDownloadCsvModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]" onClick={() => setShowDownloadCsvModal(false)}>
+          <div className="bg-gray-800 border-2 border-gray-600 rounded-lg shadow-2xl p-6 min-w-[320px] max-w-[400px] z-[9999]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Download CSV</h3>
+              <button
+                onClick={() => setShowDownloadCsvModal(false)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-sm text-gray-400 mb-4">Choose Q&A or Poll data to download (separate from Railway live CSV).</p>
+            <div className="space-y-3">
+              {(qas.length > 0 || qaQuestions.length > 0) && (
+                <div>
+                  <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Q&A (ACTIVE, Cue, Next)</div>
+                  <div className="space-y-1">
+                    <button
+                      onClick={() => {
+                        const active = qaQuestions.find((q) => q.isActive) ?? null;
+                        const cue = qaQuestions.find((q) => q.isQueued) ?? null;
+                        const next = qaQuestions.find((q) => q.isNext) ?? null;
+                        const csv = buildLiveQaCsv6({
+                          active: active ? { question: active.question ?? '', submitterName: active.submitterName } : null,
+                          cue: cue ? { question: cue.question ?? '', submitterName: cue.submitterName } : null,
+                          next: next ? { question: next.question ?? '', submitterName: next.submitterName } : null,
+                        });
+                        downloadCsv(`qa-all-${selectedEventId}.csv`, csv);
+                        setShowDownloadCsvModal(false);
+                      }}
+                      className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-left text-sm"
+                    >
+                      All sessions
+                    </button>
+                    {qas.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => {
+                          const sessionQuestions = qaQuestions.filter((q) => q.sessionId === s.id);
+                          const active = sessionQuestions.find((q) => q.isActive) ?? null;
+                          const cue = sessionQuestions.find((q) => q.isQueued) ?? null;
+                          const next = sessionQuestions.find((q) => q.isNext) ?? null;
+                          const csv = buildLiveQaCsv6({
+                            active: active ? { question: active.question ?? '', submitterName: active.submitterName } : null,
+                            cue: cue ? { question: cue.question ?? '', submitterName: cue.submitterName } : null,
+                            next: next ? { question: next.question ?? '', submitterName: next.submitterName } : null,
+                          });
+                          const name = (s.name || 'session').replace(/\W+/g, '-');
+                          downloadCsv(`qa-${name}-${selectedEventId}.csv`, csv);
+                          setShowDownloadCsvModal(false);
+                        }}
+                        className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-left text-sm"
+                      >
+                        {s.name || 'Untitled'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {polls.length > 0 && (
+                <div>
+                  <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Polls</div>
+                  <div className="space-y-1">
+                    {polls.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          const csv = buildPollCsv({ title: p.title, options: p.options });
+                          const safeTitle = (p.title || 'poll').replace(/\W+/g, '-');
+                          downloadCsv(`poll-${safeTitle}-${selectedEventId}.csv`, csv);
+                          setShowDownloadCsvModal(false);
+                        }}
+                        className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-left text-sm"
+                      >
+                        {p.title || 'Untitled'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {qaQuestions.length === 0 && polls.length === 0 && (
+                <p className="text-gray-500 text-sm py-4">No Q&A or polls to download.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Output Options Popup */}
       {showOutputOptions && (
@@ -1613,21 +1711,56 @@ export default function OperatorsPage() {
                       {selectedEvent.name}
                     </h2>
                     {selectedEventId && (
-                      <div className="flex flex-wrap items-center gap-2 mb-4 text-sm text-gray-400">
-                        <span>Event ID:</span>
-                        <code className="bg-gray-700 px-2 py-1 rounded font-mono text-gray-300">{selectedEventId}</code>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(selectedEventId);
-                            } catch (_) {}
-                          }}
-                          className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs"
-                        >
-                          Copy
-                        </button>
-                        <span className="text-gray-500">(use in Railway CSV URL and Sheets =IMPORTDATA)</span>
+                      <div className="space-y-3 mb-4">
+                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-400">
+                          <span>Event ID:</span>
+                          <code className="bg-gray-700 px-2 py-1 rounded font-mono text-gray-300">{selectedEventId}</code>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(selectedEventId);
+                              } catch (_) {}
+                            }}
+                            className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        {selectedEvent?.railwayLiveCsvBaseUrl?.trim() && (
+                          <div className="flex flex-wrap items-center gap-3 text-sm">
+                            <span className="text-gray-500 font-medium">Railway CSV:</span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const url = `${selectedEvent.railwayLiveCsvBaseUrl!.replace(/\/+$/, '')}/live-qa-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
+                                  const formula = `=IMPORTDATA("${url}")`;
+                                  try {
+                                    await navigator.clipboard.writeText(formula);
+                                  } catch (_) {}
+                                }}
+                                className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-xs text-white"
+                              >
+                                Copy Q&A formula
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const url = `${selectedEvent.railwayLiveCsvBaseUrl!.replace(/\/+$/, '')}/live-poll-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
+                                  const formula = `=IMPORTDATA("${url}")`;
+                                  try {
+                                    await navigator.clipboard.writeText(formula);
+                                  } catch (_) {}
+                                }}
+                                className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-xs text-white"
+                              >
+                                Copy Poll formula
+                              </button>
+                            </div>
+                            <span className="text-gray-500 text-xs">Configure Railway URL in Event page → Google Sheet</span>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1734,6 +1867,18 @@ export default function OperatorsPage() {
                                     title="Show on public event page (voting)"
                                   >
                                     Public
+                                  </button>
+                                  {/* CSV source - which poll to export for Railway live Poll CSV */}
+                                  <button
+                                    onClick={() => handleSetCSVPollSource(poll.id)}
+                                    className={`px-3 py-2 rounded-lg transition-colors text-sm font-medium border ${
+                                      csvSourcePollId === poll.id
+                                        ? 'bg-cyan-600 hover:bg-cyan-500 text-white border-cyan-500'
+                                        : 'bg-gray-700 hover:bg-gray-600 text-gray-300 border-cyan-500/50'
+                                    }`}
+                                    title="Use this poll for Railway live Poll CSV export"
+                                  >
+                                    CSV
                                   </button>
                                   {/* Play button - always visible */}
                                   <button
@@ -2270,9 +2415,10 @@ export default function OperatorsPage() {
             maxHeight: '90vh',
           }}
         >
-          {/* Header - Draggable */}
+          {/* Header - Draggable (drag by header; buttons still clickable) */}
           <div
-            className="preview-drag-handle bg-gray-700 px-4 py-2 flex items-center justify-between cursor-move border-b border-gray-600"
+            className="preview-drag-handle bg-gray-700 px-4 py-2 flex items-center justify-between border-b border-gray-600"
+            style={{ cursor: 'move' }}
             onMouseDown={handleMouseDown}
           >
             <div className="flex items-center gap-2">

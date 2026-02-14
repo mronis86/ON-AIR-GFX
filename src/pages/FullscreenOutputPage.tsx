@@ -674,244 +674,143 @@ export default function FullscreenOutputPage() {
           </div>
             </div>
           ) : layoutStyle === 2 ? (
-        /* Lower Third Layout - Fixed height (1/3 of screen) at bottom */
+        /* Lower Third - EXACT match to Event page: 960x540, absolute bottom-0 left-0 right-0, content-sized strip */
         (() => {
-          // Get zoom setting for Box Edge
           let borderSetting;
-          if (contentType === 'poll') {
-            borderSetting = (activeContent as Poll)?.borderSettings?.lowerThird;
-          } else {
-            borderSetting = (activeContent as QandA)?.borderSettings?.lowerThird;
-          }
+          if (contentType === 'poll') borderSetting = (activeContent as Poll)?.borderSettings?.lowerThird;
+          else borderSetting = (activeContent as QandA)?.borderSettings?.lowerThird;
           const borderType = (borderSetting as any)?.type || borderSetting?.position || 'line';
-          // Get zoom percentage (70-110, default 100) - this scales everything proportionally
-          // Only apply zoom if Box Edge is selected AND zoom is explicitly set
           const hasBoxEdge = borderType === 'boxEdge' || borderType === 'boxInner' || borderType === 'inner';
           const zoomPercent = (hasBoxEdge && (borderSetting as any)?.zoom !== undefined) ? (borderSetting as any).zoom : 100;
-          const zoomScale = zoomPercent / 100; // Convert to scale factor (0.7 to 1.1)
-          
-          // Get Y position offset (vertical adjustment) - default 0
-          // If yPosition is explicitly 0, use it; if undefined/null, default to 0; only use value if it exists and is not null/undefined
-          const yPosition = (hasBoxEdge && (borderSetting as any)?.yPosition !== undefined && (borderSetting as any)?.yPosition !== null) 
-            ? (borderSetting as any).yPosition 
-            : 0;
-          
-          // Apply zoom to scale everything inside proportionally (text, bars, borders, everything)
-          // Only apply zoom transform if zoom is different from 100%
+          const zoomScale = zoomPercent / 100;
+          const yPosition = (hasBoxEdge && (borderSetting as any)?.yPosition != null) ? (borderSetting as any).yPosition : 0;
           const shouldZoom = hasBoxEdge && zoomPercent !== 100;
-          
-          // When scaling from center, the element shrinks from its center point
-          // To keep it anchored at the bottom, we need to adjust the bottom position
-          // The height reduction is: originalHeight * (1 - zoomScale)
-          // Since we scale from center, we adjust by half that amount
-          // Only adjust if we're actually zooming
-          const baseHeight = BASE_HEIGHT / 3;
-          const originalScaledHeight = baseHeight * scaleFactor;
-          const zoomedScaledHeight = shouldZoom ? originalScaledHeight * zoomScale : originalScaledHeight;
-          const heightReduction = originalScaledHeight - zoomedScaledHeight;
-          // At 100% zoom (shouldZoom = false), bottom should be exactly 0 + yPosition adjustment
-          // When zoomed, adjust by half the height reduction to compensate for center scaling
-          // Ensure yPosition is treated as 0 if undefined/null (including when explicitly 0)
-          const actualYPosition = yPosition || 0; // Default to 0 if undefined/null/0
-          const lineOffset = 25; // Lower the line by 25px (move container up by 25px, so add to bottom)
-          const bottomAdjustment = shouldZoom 
-            ? (heightReduction / 2) - (actualYPosition * scaleFactor) + (lineOffset * scaleFactor)
-            : -actualYPosition + lineOffset; // At 100%, add line offset to move container up (line appears lower)
-          
+
           return (
             <div
-              className="relative w-full h-full hide-scrollbar"
               style={{
-                width: shouldZoom ? `${BASE_WIDTH}px` : '100%', // Full width at 100%, fixed width when zoomed
-                height: `${baseHeight}px`, // Fixed to 1/3 of base height
-                transform: shouldZoom ? `scale(${zoomScale})` : undefined, // Apply zoom transform when not 100%
-                transformOrigin: shouldZoom ? 'center center' : undefined, // Scale from center anchor point when zooming
+                width: `${BASE_WIDTH}px`,
+                height: `${BASE_HEIGHT}px`,
+                transform: `scale(${scaleFactor})`,
+                transformOrigin: 'center center',
                 overflow: 'hidden',
                 position: 'absolute',
-                left: shouldZoom ? '50%' : '0', // Left edge at 100%, center when zoomed
-                right: shouldZoom ? undefined : '0', // Right edge at 100% (for edge-to-edge)
-                bottom: `${bottomAdjustment}px`, // Bottom edge - lowered by 25px, adjusted when zoomed
-                marginLeft: shouldZoom ? `-${BASE_WIDTH / 2}px` : '0', // Center offset when zoomed, no margin at 100%
+                left: '50%',
+                top: '50%',
+                marginLeft: `-${BASE_WIDTH / 2}px`,
+                marginTop: `-${BASE_HEIGHT / 2}px`,
               }}
             >
-          {/* Background layer - animates first if enabled */}
-          <div
-            className={`absolute inset-0 transition-all duration-500 ${
-              animationSettings.backgroundAnimateFirst && isVisible
-                ? 'opacity-100'
-                : !animationSettings.backgroundAnimateFirst
-                ? (isVisible ? 'opacity-100' : 'opacity-0')
-                : 'opacity-0'
-            }`}
-            style={{
-              width: '100%', // Full width of parent container
-              height: `${baseHeight}px`,
-              zIndex: 0,
-              ...(Object.keys(layoutBgStyle).length > 0
-                ? layoutBgStyle
-                : {
-                  background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 100%)',
-                }),
-                ...layoutBorderStyle,
-                backdropFilter: 'blur(8px)',
-                ...(contentType === 'poll' && layoutStyle === 2 && (activeContent as Poll).borderRadius ? {
-                  borderRadius: `${(activeContent as Poll).borderRadius}px`,
-                } : {}),
-                ...(contentType === 'qa' && layoutStyle === 2 && (activeContent as QandA).borderRadius ? {
-                  borderRadius: `${(activeContent as QandA).borderRadius}px`,
-                } : {}),
-            }}
-          />
-          {/* Content layer: in = keyframe, out = transition via inline style */}
-          <div
-            className={`absolute inset-0 hide-scrollbar ${
-              isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'
-            }`}
-            style={{
-              width: '100%',
-              height: `${baseHeight}px`,
-              zIndex: 1,
-              background: 'transparent',
-              transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-              padding: (layoutBorderStyle as any)?.padding ? undefined : (shouldZoom ? '24px' : '24px'),
-              ...(isVisible ? {} : getAnimationOutStyle(animationSettings.animationOutType)),
-            }}
-          >
-            {renderContent()}
+              {/* Event page: relative bg-black rounded-lg overflow-hidden 960x540 */}
+              <div className="rounded-lg overflow-hidden" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000' }}>
+                {/* Event page: absolute bottom-0 left-0 right-0 - NO fixed height, sizes to content */}
+                <div
+                  className={`${animationSettings.backgroundAnimateFirst && isVisible ? '' : !animationSettings.backgroundAnimateFirst ? (isVisible ? '' : 'opacity-0') : 'opacity-0'} ${isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'}`}
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    zIndex: 1,
+                    ...(Object.keys(layoutBgStyle).length > 0 ? layoutBgStyle : { background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 100%)' }),
+                    ...layoutBorderStyle,
+                    backdropFilter: 'blur(8px)',
+                    marginBottom: `${-yPosition}px`,
+                    ...(contentType === 'poll' && (activeContent as Poll).borderRadius ? { borderRadius: `${(activeContent as Poll).borderRadius}px` } : {}),
+                    ...(contentType === 'qa' && (activeContent as QandA).borderRadius ? { borderRadius: `${(activeContent as QandA).borderRadius}px` } : {}),
+                    ...(shouldZoom ? { transform: `scale(${zoomScale})`, transformOrigin: 'center center' } : {}),
+                    transition: 'opacity 500ms',
+                    transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
+                    ...(isVisible ? {} : getAnimationOutStyle(animationSettings.animationOutType)),
+                  }}
+                >
+                  {/* Event page: div with p-6 (24px padding) */}
+                  <div style={{ padding: '24px' }}>
+                    {renderContent()}
+                  </div>
+                </div>
               </div>
             </div>
           );
         })()
       ) : layoutStyle === 3 ? (
-        /* PIP Layout - Side box (for polls and Q&A layout 3) */
+        /* PIP - EXACT match to Event page: 960x540, absolute w-96 left-6/right-6, top 24px */
         (() => {
-          // Get PIP zoom and positioning settings
+          const pipSide = contentType === 'poll' ? (activeContent as Poll).pipPosition === 'left' : (activeContent as QandA).splitScreenPosition === 'left';
           let pipZoom = 100;
-          let pipXPosition = 0;
-          let pipYPosition = 0;
+          let pipX = 0;
+          let pipY = 0;
           if (contentType === 'poll') {
-            const pipBorderSetting = (activeContent as Poll)?.borderSettings?.pip;
-            pipZoom = (pipBorderSetting as any)?.zoom !== undefined ? (pipBorderSetting as any).zoom : 100;
-            pipXPosition = (pipBorderSetting as any)?.xPosition !== undefined && (pipBorderSetting as any).xPosition !== null ? (pipBorderSetting as any).xPosition : 0;
-            pipYPosition = (pipBorderSetting as any)?.yPosition !== undefined && (pipBorderSetting as any).yPosition !== null ? (pipBorderSetting as any).yPosition : 0;
-          } else if (contentType === 'qa') {
-            const pipBorderSetting = (activeContent as QandA)?.borderSettings?.pip;
-            pipZoom = (pipBorderSetting as any)?.zoom !== undefined ? (pipBorderSetting as any).zoom : 100;
-            pipXPosition = (pipBorderSetting as any)?.xPosition !== undefined && (pipBorderSetting as any).xPosition !== null ? (pipBorderSetting as any).xPosition : 0;
-            pipYPosition = (pipBorderSetting as any)?.yPosition !== undefined && (pipBorderSetting as any).yPosition !== null ? (pipBorderSetting as any).yPosition : 0;
+            const s = (activeContent as Poll)?.borderSettings?.pip;
+            pipZoom = (s as any)?.zoom ?? 100;
+            pipX = (s as any)?.xPosition ?? 0;
+            pipY = (s as any)?.yPosition ?? 0;
+          } else {
+            const s = (activeContent as QandA)?.borderSettings?.pip;
+            pipZoom = (s as any)?.zoom ?? 100;
+            pipX = (s as any)?.xPosition ?? 0;
+            pipY = (s as any)?.yPosition ?? 0;
           }
-          
           const pipZoomScale = pipZoom / 100;
           const shouldPipZoom = pipZoom !== 100;
-          
-          // Calculate base position
-          const baseTop = contentType === 'poll' ? 24 : 0;
-          const baseLeft = contentType === 'poll' && (activeContent as Poll).pipPosition === 'left' ? 24 : undefined;
-          const baseRight = contentType === 'poll' && (activeContent as Poll).pipPosition === 'right' ? 24 : undefined;
-          const baseLeftQA = contentType === 'qa' && (activeContent as QandA).splitScreenPosition === 'left' ? 0 : undefined;
-          const baseRightQA = contentType === 'qa' && (activeContent as QandA).splitScreenPosition === 'right' ? 0 : undefined;
-          
-          // Apply X and Y position adjustments and zoom
-          const finalTop = baseTop + pipYPosition;
-          const finalLeft = baseLeft !== undefined ? baseLeft + pipXPosition : baseLeft;
-          const finalRight = baseRight !== undefined ? baseRight - pipXPosition : baseRight;
-          const finalLeftQA = baseLeftQA !== undefined ? baseLeftQA + pipXPosition : baseLeftQA;
-          const finalRightQA = baseRightQA !== undefined ? baseRightQA - pipXPosition : baseRightQA;
-          
-          // Apply zoom to transform
-          const finalTransform = shouldPipZoom 
-            ? `scale(${scaleFactor * pipZoomScale})`
-            : `scale(${scaleFactor})`;
-          
+          const pipOutType = pipSide ? (animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType) : (animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType);
+
+          // Event page: top: 24+yPosition, left: 24+xPosition (or right: 24-xPosition)
+          const topStyle = `${24 + pipY}px`;
+          const leftStyle = pipSide ? `${24 + pipX}px` : undefined;
+          const rightStyle = pipSide ? undefined : `${24 - pipX}px`;
+
+          const pipBoxStyle: React.CSSProperties = {
+            position: 'absolute' as const,
+            top: topStyle,
+            width: '384px', // w-96 - matches Event page
+            maxWidth: '35vw', // matches Event page max-w-[35vw] - keeps layout consistent when viewport changes
+            maxHeight: '70vh', // matches Event page exactly - same space/layout format
+            overflowY: 'auto' as const,
+            ...(pipSide ? { left: leftStyle } : { right: rightStyle }),
+            ...(Object.keys(layoutBgStyle).length > 0 ? layoutBgStyle : { background: 'rgba(0,0,0,0.95)' }),
+            backdropFilter: 'blur(8px)',
+            ...(contentType === 'poll'
+              ? ((activeContent as Poll).borderSettings?.pip?.thickness === 0 ? {} : { border: `2px solid ${primaryColor}`, borderRadius: (activeContent as Poll).borderRadius ? `${(activeContent as Poll).borderRadius}px` : '12px' })
+              : { borderRadius: (activeContent as QandA).borderRadius ? `${(activeContent as QandA).borderRadius}px` : '0' }),
+            ...(shouldPipZoom ? { transform: `scale(${pipZoomScale})`, transformOrigin: pipSide ? 'left top' : 'right top' } : {}),
+          };
+
           return (
             <div
-              className="relative w-full h-full hide-scrollbar"
               style={{
                 width: `${BASE_WIDTH}px`,
                 height: `${BASE_HEIGHT}px`,
-                transform: finalTransform,
-                transformOrigin: contentType === 'poll' 
-                  ? ((activeContent as Poll).pipPosition === 'left' ? 'left top' : 'right top')
-                  : ((activeContent as QandA).splitScreenPosition === 'left' ? 'left center' : 'right center'),
+                transform: `scale(${scaleFactor})`,
+                transformOrigin: 'center center',
                 overflow: 'hidden',
                 position: 'absolute',
-                top: `${finalTop}px`,
-                ...(contentType === 'poll'
-                  ? (finalLeft !== undefined ? { left: `${finalLeft}px` } : { right: `${finalRight}px` })
-                  : (finalLeftQA !== undefined ? { left: `${finalLeftQA}px` } : { right: `${finalRightQA}px` })),
-                maxWidth: contentType === 'poll' ? '35vw' : '50vw',
-                ...(contentType === 'qa' ? { height: '100%' } : {}),
+                left: '50%',
+                top: '50%',
+                marginLeft: `-${BASE_WIDTH / 2}px`,
+                marginTop: `-${BASE_HEIGHT / 2}px`,
               }}
             >
-          {/* Background layer - animates first if enabled */}
-          <div
-            className={`absolute inset-0 transition-all duration-500 ${
-              animationSettings.backgroundAnimateFirst && isVisible
-                ? 'opacity-100'
-                : !animationSettings.backgroundAnimateFirst
-                ? (isVisible ? 'opacity-100' : 'opacity-0')
-                : 'opacity-0'
-            }`}
-            style={{
-              width: `${BASE_WIDTH}px`,
-              height: `${BASE_HEIGHT}px`,
-              zIndex: 0,
-              ...(Object.keys(layoutBgStyle).length > 0
-                ? layoutBgStyle
-                : {
-                    background: 'rgba(0,0,0,0.95)',
-                  }),
-              ...(contentType === 'poll' ? {} : layoutBorderStyle),
-              backdropFilter: 'blur(8px)',
-              // Apply PIP border and borderRadius
-              ...(contentType === 'poll' && layoutStyle === 3
-                ? (() => {
-                    const hasCustomBorder = layoutBorderStyle && Object.keys(layoutBorderStyle).length > 0 && (layoutBorderStyle as any).border;
-                    const pipBorderSetting = (activeContent as Poll)?.borderSettings?.pip;
-                    const borderThickness = pipBorderSetting?.thickness;
-                    const isBorderOff = borderThickness === 0;
-                    const pollBorderRadius = (activeContent as Poll).borderRadius ? `${(activeContent as Poll).borderRadius}px` : '12px';
-                    
-                    if (isBorderOff) {
-                      return { borderRadius: pollBorderRadius };
-                    } else if (hasCustomBorder) {
-                      return { ...layoutBorderStyle, borderRadius: pollBorderRadius };
-                    } else {
-                      return { border: `2px solid ${primaryColor}`, borderRadius: pollBorderRadius };
-                    }
-                  })()
-                : contentType === 'qa' && layoutStyle === 3
-                ? (() => {
-                    const qaBorderRadius = (activeContent as QandA).borderRadius ? `${(activeContent as QandA).borderRadius}px` : '0';
-                    return { borderRadius: qaBorderRadius };
-                  })()
-                : {}),
-            }}
-          />
-          {/* Content layer: in = keyframe, out = transition via inline style */}
-          {(() => {
-            const pipSide = contentType === 'poll' ? (activeContent as Poll).pipPosition === 'left' : (activeContent as QandA).splitScreenPosition === 'left';
-            const pipOutType = pipSide ? (animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType) : (animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType);
-            return (
-          <div
-            className={`absolute inset-0 hide-scrollbar ${
-              isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'
-            }`}
-            style={{
-              width: `${BASE_WIDTH}px`,
-              height: `${BASE_HEIGHT}px`,
-              zIndex: 1,
-              background: 'transparent',
-              transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-              padding: contentType === 'poll' ? '16px' : '32px',
-              ...(isVisible ? {} : getAnimationOutStyle(pipOutType)),
-            }}
-          >
-            {renderContent()}
-          </div>
-            );
-          })()}
-        </div>
+              {/* Event page: relative bg-black rounded-lg overflow-hidden 960x540 */}
+              <div className="rounded-lg overflow-hidden" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000' }}>
+                {/* Event page: absolute w-96 left-6 or right-6, top 24px, p-4 child */}
+                <div
+                  className={`${animationSettings.backgroundAnimateFirst && isVisible ? '' : !animationSettings.backgroundAnimateFirst ? (isVisible ? '' : 'opacity-0') : 'opacity-0'} ${isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'}`}
+                  style={{
+                    ...pipBoxStyle,
+                    zIndex: 1,
+                    transition: 'opacity 500ms',
+                    transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
+                    ...(isVisible ? {} : getAnimationOutStyle(pipOutType)),
+                  }}
+                >
+                  {/* Event page: div with p-4 (16px padding) */}
+                  <div style={{ padding: contentType === 'poll' ? '16px' : '32px' }}>
+                    {renderContent()}
+                  </div>
+                </div>
+              </div>
+            </div>
           );
         })()
       ) : (

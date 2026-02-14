@@ -28,6 +28,8 @@ export interface LiveStateData {
   activeQA: { question: string; answer?: string; submitterName?: string } | null;
   /** Q&A session ID to use for CSV export (ACTIVE, Cue, Next columns). Set via CSV button in Operators. */
   csvSourceSessionId?: string | null;
+  /** Poll ID to use for live Poll CSV export. Set via CSV button in Operators. */
+  csvSourcePollId?: string | null;
   pollSheetName?: string;
   qaSheetName?: string;
   qaCell?: string;

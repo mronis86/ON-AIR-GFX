@@ -1,6 +1,7 @@
 /**
  * Live CSV server for Railway.
  * GET /live-qa-csv?eventId=xxx returns Q&A as CSV (6 columns).
+ * GET /live-poll-csv?eventId=xxx returns Poll as CSV (title, options, votes).
  * Reads from Firestore. Set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT (JSON string) in Railway env.
  */
 const express = require('express');
@@ -77,8 +78,56 @@ app.get('/live-qa-csv', async (req, res) => {
   }
 });
 
+app.get('/live-poll-csv', async (req, res) => {
+  if (!db) {
+    res.status(500).set('Content-Type', 'text/plain').send('Server not configured. Set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT.');
+    return;
+  }
+  const eventId = (req.query.eventId || req.query.eventid || '').toString().trim();
+  if (!eventId) {
+    res.status(400).set('Content-Type', 'text/plain').send('Missing eventId query parameter');
+    return;
+  }
+  try {
+    const liveSnap = await db.collection('liveState').doc(eventId).get();
+    const liveData = liveSnap.exists ? liveSnap.data() : {};
+    const csvSourcePollId = liveData.csvSourcePollId || null;
+
+    if (!csvSourcePollId) {
+      const rows = ['Title', 'Option,Votes'];
+      const csv = '\uFEFF' + rows.join('\r\n');
+      res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
+      return;
+    }
+
+    const pollSnap = await db.collection('polls').doc(csvSourcePollId).get();
+    if (!pollSnap.exists) {
+      const rows = ['Title', 'Option,Votes'];
+      const csv = '\uFEFF' + rows.join('\r\n');
+      res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
+      return;
+    }
+
+    const poll = { id: pollSnap.id, ...pollSnap.data() };
+    if (poll.eventId !== eventId) {
+      const rows = ['Title', 'Option,Votes'];
+      const csv = '\uFEFF' + rows.join('\r\n');
+      res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
+      return;
+    }
+
+    const title = escapeCsv(poll.title ?? '');
+    const optRows = (poll.options ?? []).map((o) => [escapeCsv(o.text ?? ''), o.votes ?? 0].join(','));
+    const rows = [title, 'Option,Votes', ...optRows];
+    const csv = '\uFEFF' + rows.join('\r\n');
+    res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
+  } catch (err) {
+    res.status(500).set('Content-Type', 'text/plain').send(err?.message || 'Error');
+  }
+});
+
 app.get('/', (req, res) => {
-  res.send('Live CSV server. Use GET /live-qa-csv?eventId=YOUR_EVENT_ID');
+  res.send('Live CSV server. Use GET /live-qa-csv?eventId=YOUR_EVENT_ID or GET /live-poll-csv?eventId=YOUR_EVENT_ID');
 });
 
 app.listen(PORT, () => {

@@ -88,6 +88,47 @@ export function buildLiveDataCsv(data: {
   return '\uFEFF' + rows.join('\r\n'); // BOM for Excel
 }
 
+/**
+ * Build a CSV for a single poll (title, options, votes) for download.
+ */
+export function buildPollCsv(poll: {
+  title: string;
+  options?: Array<{ text: string; votes?: number }>;
+}): string {
+  const rows: string[] = [escapeCsv(poll.title)];
+  rows.push('Option,Votes');
+  (poll.options ?? []).forEach((opt) => {
+    rows.push([escapeCsv(opt.text), opt.votes ?? 0].join(','));
+  });
+  return '\uFEFF' + rows.join('\r\n'); // BOM for Excel
+}
+
+/**
+ * Build a CSV of all Q&A questions for a session (full list, not just ACTIVE/Cue/Next).
+ * Format: Question, Name, Status, IsActive, IsQueued, IsNext, IsDone
+ */
+export function buildQaSessionCsv(questions: Array<{
+  question?: string;
+  submitterName?: string;
+  status?: string;
+  isActive?: boolean;
+  isQueued?: boolean;
+  isNext?: boolean;
+  isDone?: boolean;
+}>): string {
+  const header = 'Question,Name,Status,IsActive,IsQueued,IsNext,IsDone';
+  const dataRows = questions.map((q) => [
+    escapeCsv(q.question ?? ''),
+    escapeCsv(q.submitterName ?? ''),
+    escapeCsv(q.status ?? ''),
+    q.isActive ? '1' : '0',
+    q.isQueued ? '1' : '0',
+    q.isNext ? '1' : '0',
+    q.isDone ? '1' : '0',
+  ].join(','));
+  return '\uFEFF' + [header, ...dataRows].join('\r\n');
+}
+
 export function downloadCsv(filename: string, csv: string): void {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
