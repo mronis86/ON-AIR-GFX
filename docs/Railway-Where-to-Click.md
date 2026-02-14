@@ -20,18 +20,9 @@ If you don’t see “Root Directory”, look for **“Source”** or **“Monor
 
 ---
 
-## Option B: Use the Dockerfile (no Root Directory needed)
+## Option B: Root Directory is required
 
-The repo has a **Dockerfile** inside `live-csv-server/`. You can tell Railway to use it so it only builds the CSV server.
-
-1. Same as above: **Project** → click the **service** (the box for ON-AIR-GFX).
-2. Open the **Variables** tab (not Settings).
-3. Click **New variable** (or **Add variable**).
-4. Name: **`RAILWAY_DOCKERFILE_PATH`**  
-   Value: **`live-csv-server/Dockerfile`**
-5. Save. Redeploy the service (e.g. from the Deployments tab, or push a commit).
-
-Railway will then build with that Dockerfile and run only the live-csv server.
+The **Dockerfile** inside `live-csv-server/` expects **Root Directory = live-csv-server**. Do not use RAILWAY_DOCKERFILE_PATH without Root Directory. If you previously set RAILWAY_DOCKERFILE_PATH, remove it and use only Root Directory.
 
 ---
 

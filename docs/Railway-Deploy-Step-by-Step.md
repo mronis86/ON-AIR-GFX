@@ -134,4 +134,5 @@ If the app has a “Railway URL” or “Live CSV server URL” field in the eve
 - **Build fails:** Ensure Root Directory is exactly `live-csv-server` and that the folder has `package.json` and `server.js`.
 - **500 or “Set FIREBASE_API_KEY”:** Check FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT in Railway → Variables.
 - **Empty or wrong CSV:** Check that the event ID is correct and that the Operators app has written live state to Firestore for that event.
+- **"Cannot GET /live-poll-csv":** Old code may be deployed. Open your Railway URL in a browser – you should see "Live CSV server v2025-02-poll". Ensure Root Directory = live-csv-server, then Redeploy (with Clear build cache if available). Confirm latest code is on GitHub.
 - **Sheets doesn’t refresh:** IMPORTDATA refreshes on a schedule (e.g. hourly); you can’t force a refresh from the formula. For more frequent updates, use a trigger or the Apps Script approach.

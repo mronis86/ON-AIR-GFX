@@ -3,7 +3,9 @@
  * GET /live-qa-csv?eventId=xxx returns Q&A as CSV (6 columns).
  * GET /live-poll-csv?eventId=xxx returns Poll as CSV (title, options, votes).
  * Reads from Firestore. Set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT (JSON string) in Railway env.
+ * Version: 2025-02-poll (includes /live-poll-csv endpoint)
  */
+const SERVER_VERSION = '2025-02-poll';
 const express = require('express');
 const admin = require('firebase-admin');
 
@@ -134,9 +136,9 @@ app.get('/live-poll-csv', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('Live CSV server. Use GET /live-qa-csv?eventId=YOUR_EVENT_ID or GET /live-poll-csv?eventId=YOUR_EVENT_ID');
+  res.send(`Live CSV server v${SERVER_VERSION}. Use GET /live-qa-csv?eventId=YOUR_EVENT_ID or GET /live-poll-csv?eventId=YOUR_EVENT_ID`);
 });
 
 app.listen(PORT, () => {
-  console.log(`Live CSV server on port ${PORT}`);
+  console.log(`Live CSV server v${SERVER_VERSION} on port ${PORT} - routes: /live-qa-csv, /live-poll-csv`);
 });
