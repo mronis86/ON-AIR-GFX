@@ -79,7 +79,8 @@ export default function OperatorsPage() {
   const [expandedPollId, setExpandedPollId] = useState<string | null>(null);
   const [csvSourceSessionId, setCsvSourceSessionId] = useState<string | null>(null);
   const [csvSourcePollId, setCsvSourcePollId] = useState<string | null>(null);
-  const [operatorRailwayBaseUrl, setOperatorRailwayBaseUrl] = useState('');
+  const DEFAULT_RAILWAY_BASE_URL = 'https://on-air-gfx-production.up.railway.app';
+  const [operatorRailwayBaseUrl, setOperatorRailwayBaseUrl] = useState(DEFAULT_RAILWAY_BASE_URL);
   const [expandedQAId, setExpandedQAId] = useState<string | null>(null);
   const [previewOutput, setPreviewOutput] = useState<number>(1); // Output 1-4 for preview
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0); // Increment to force iframe reload
@@ -531,7 +532,7 @@ export default function OperatorsPage() {
     sessionStorage.removeItem('operator_authenticated');
     setSelectedEventId(null);
     setSelectedEvent(null);
-    setOperatorRailwayBaseUrl('');
+    setOperatorRailwayBaseUrl(DEFAULT_RAILWAY_BASE_URL);
     setPolls([]);
     window.location.href = '/';
   };
@@ -549,7 +550,7 @@ export default function OperatorsPage() {
       
       setSelectedEventId(eventId);
       setSelectedEvent(event);
-      setOperatorRailwayBaseUrl(event?.railwayLiveCsvBaseUrl?.trim() ?? '');
+      setOperatorRailwayBaseUrl(event?.railwayLiveCsvBaseUrl?.trim() || DEFAULT_RAILWAY_BASE_URL);
       setPolls(eventPolls);
       setQAs(qaSessions);
       setQAQuestions(qaSubmissions);

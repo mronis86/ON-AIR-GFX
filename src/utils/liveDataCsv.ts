@@ -96,13 +96,14 @@ export function buildPollCsv(poll: {
   options?: Array<{ text: string; votes?: number }>;
 }): string {
   const rows: string[] = [escapeCsv(poll.title)];
-  rows.push('Option,Votes,Percentage');
+  rows.push('Option,Votes,Percentage,PercentRounded');
   const opts = poll.options ?? [];
   const totalVotes = opts.reduce((sum, o) => sum + (o.votes ?? 0), 0);
   opts.forEach((opt) => {
     const v = opt.votes ?? 0;
-    const pct = totalVotes > 0 ? ((v / totalVotes) * 100).toFixed(1) : '0';
-    rows.push([escapeCsv(opt.text), v, pct].join(','));
+    const pct = totalVotes > 0 ? ((v / totalVotes) * 100).toFixed(1) + '%' : '0%';
+    const pctRounded = totalVotes > 0 ? Math.round((v / totalVotes) * 100) + '%' : '0%';
+    rows.push([escapeCsv(opt.text), v, pct, pctRounded].join(','));
   });
   return '\uFEFF' + rows.join('\r\n'); // BOM for Excel
 }

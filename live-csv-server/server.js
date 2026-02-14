@@ -94,7 +94,7 @@ app.get('/live-poll-csv', async (req, res) => {
     const csvSourcePollId = liveData.csvSourcePollId || null;
 
     if (!csvSourcePollId) {
-      const rows = ['Title', 'Option,Votes,Percentage'];
+      const rows = ['Title', 'Option,Votes,Percentage,PercentRounded'];
       const csv = '\uFEFF' + rows.join('\r\n');
       res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
       return;
@@ -102,7 +102,7 @@ app.get('/live-poll-csv', async (req, res) => {
 
     const pollSnap = await db.collection('polls').doc(csvSourcePollId).get();
     if (!pollSnap.exists) {
-      const rows = ['Title', 'Option,Votes,Percentage'];
+      const rows = ['Title', 'Option,Votes,Percentage,PercentRounded'];
       const csv = '\uFEFF' + rows.join('\r\n');
       res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
       return;
@@ -110,7 +110,7 @@ app.get('/live-poll-csv', async (req, res) => {
 
     const poll = { id: pollSnap.id, ...pollSnap.data() };
     if (poll.eventId !== eventId) {
-      const rows = ['Title', 'Option,Votes,Percentage'];
+      const rows = ['Title', 'Option,Votes,Percentage,PercentRounded'];
       const csv = '\uFEFF' + rows.join('\r\n');
       res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
       return;
@@ -121,10 +121,11 @@ app.get('/live-poll-csv', async (req, res) => {
     const totalVotes = opts.reduce((sum, o) => sum + (o.votes ?? 0), 0);
     const optRows = opts.map((o) => {
       const v = o.votes ?? 0;
-      const pct = totalVotes > 0 ? ((v / totalVotes) * 100).toFixed(1) : '0';
-      return [escapeCsv(o.text ?? ''), v, pct].join(',');
+      const pct = totalVotes > 0 ? ((v / totalVotes) * 100).toFixed(1) + '%' : '0%';
+      const pctRounded = totalVotes > 0 ? Math.round((v / totalVotes) * 100) + '%' : '0%';
+      return [escapeCsv(o.text ?? ''), v, pct, pctRounded].join(',');
     });
-    const rows = [title, 'Option,Votes,Percentage', ...optRows];
+    const rows = [title, 'Option,Votes,Percentage,PercentRounded', ...optRows];
     const csv = '\uFEFF' + rows.join('\r\n');
     res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
   } catch (err) {
