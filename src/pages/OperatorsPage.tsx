@@ -655,12 +655,36 @@ export default function OperatorsPage() {
       // Update Cue question to Active
       await updateQA(questionId, updates);
 
-      // Optimistically update local state so live-state write (Railway CSV) runs immediately
+      // Optimistically update local state
       setQAQuestions((prev) =>
         prev.map((q) =>
           q.id === questionId ? { ...q, isActive: true, isQueued: false, ...updates } : { ...q, isActive: false }
         )
       );
+
+      // Write live state to Firestore immediately (same data as Download CSV / Railway link)
+      if (selectedEventId && selectedEvent) {
+        setLiveState(selectedEventId, {
+          activePoll: activePoll
+            ? {
+                id: activePoll.id,
+                title: activePoll.title,
+                type: activePoll.type,
+                options: activePoll.options,
+                googleSheetTab: activePoll.googleSheetTab,
+              }
+            : null,
+          activeQA: {
+            question: questionToActivate.question ?? '',
+            answer: questionToActivate.answer ?? '',
+            submitterName: questionToActivate.submitterName ?? '',
+          },
+          pollSheetName: activePoll?.googleSheetTab?.trim() || undefined,
+          qaSheetName: selectedEvent.activeQASheetName?.trim() || undefined,
+          qaCell: selectedEvent.activeQACell?.trim() || undefined,
+          eventName: selectedEvent.name ?? '',
+        }).catch((err: unknown) => console.warn('Live state write failed:', err));
+      }
 
       // Reload Q&A questions to sync with server
       if (selectedEventId) {
@@ -686,6 +710,26 @@ export default function OperatorsPage() {
           isActive: false,
           isDone: true,
         });
+
+        // Clear live state (Railway CSV) so it shows no active Q&A
+        if (selectedEventId && selectedEvent) {
+          setLiveState(selectedEventId, {
+            activePoll: activePoll
+              ? {
+                  id: activePoll.id,
+                  title: activePoll.title,
+                  type: activePoll.type,
+                  options: activePoll.options,
+                  googleSheetTab: activePoll.googleSheetTab,
+                }
+              : null,
+            activeQA: null,
+            pollSheetName: activePoll?.googleSheetTab?.trim() || undefined,
+            qaSheetName: selectedEvent.activeQASheetName?.trim() || undefined,
+            qaCell: selectedEvent.activeQACell?.trim() || undefined,
+            eventName: selectedEvent.name ?? '',
+          }).catch((err: unknown) => console.warn('Live state write failed:', err));
+        }
 
         // Find the Next question and promote it to Cue
         if (selectedEventId) {
