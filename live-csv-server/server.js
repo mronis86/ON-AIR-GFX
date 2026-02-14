@@ -77,12 +77,19 @@ app.get('/live-qa-csv', async (req, res) => {
     const q = data.activeQA || null;
     const eventName = data.eventName || '';
     const updatedAt = data.updatedAt != null ? String(data.updatedAt) : '';
+    const hasQA = q && (q.question || q.answer || q.submitterName);
+    const question = hasQA ? (q.question || '') : '(No active Q&A – set one in Operators and refresh)';
+    const answer = hasQA ? (q.answer || '') : '';
+    const submitter = hasQA ? (q.submitterName || '') : '';
     const rows = [
       'Question,Answer,Submitter,Event,Updated',
-      [escapeCsv(q?.question), escapeCsv(q?.answer), escapeCsv(q?.submitterName), escapeCsv(eventName), escapeCsv(updatedAt)].join(','),
+      [escapeCsv(question), escapeCsv(answer), escapeCsv(submitter), escapeCsv(eventName), escapeCsv(updatedAt)].join(','),
     ];
     const csv = '\uFEFF' + rows.join('\r\n');
-    res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
+    res.status(200)
+      .set('Content-Type', 'text/csv; charset=utf-8')
+      .set('Content-Disposition', 'inline') // so browser may show instead of download; Sheets ignores this
+      .send(csv);
   } catch (err) {
     res.status(500).set('Content-Type', 'text/plain').send(err?.message || 'Error');
   }
