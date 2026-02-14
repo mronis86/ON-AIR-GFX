@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { getEvent, getPollsByEvent, getQAsByEvent, updateEvent, updatePoll } from '../services/firestore';
-import { extractSpreadsheetId, initializeGoogleSheet } from '../services/googleSheets';
+import { extractSpreadsheetId } from '../services/googleSheets';
+import { GOOGLE_SHEET_SCRIPT, GOOGLE_SHEET_SCRIPT_FIRESTORE, GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE } from '../constants/googleSheetScript';
 import type { Event, Poll, QandA } from '../types';
 import PollFormEnhanced from '../components/PollFormEnhanced';
 import QAForm from '../components/QAForm';
@@ -36,6 +37,18 @@ export default function EventDetailPage() {
   const [savingSheet, setSavingSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savingPollTab, setSavingPollTab] = useState<string | null>(null);
+  const [scriptCopied, setScriptCopied] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<'script' | 'error' | 'eventId' | null>(null);
+  const [scriptVariant, setScriptVariant] = useState<'webapp' | 'firestore' | 'firestore_simple' | 'blaze_url' | 'railway'>('firestore');
+  const [railwayBaseUrl, setRailwayBaseUrl] = useState('');
+  const projectId = (import.meta.env.VITE_FIREBASE_PROJECT_ID as string) || 'chamber-on-air-gfx';
+  const liveCsvUrl = eventId ? `https://us-central1-${projectId}.cloudfunctions.net/liveQaCsv?eventId=${encodeURIComponent(eventId)}` : '';
+  const importDataFormula = liveCsvUrl ? `=IMPORTDATA("${liveCsvUrl}")` : '';
+  const railwayBaseUrlClean = railwayBaseUrl.trim().replace(/\/+$/, '');
+  const railwayLiveCsvUrl = eventId && railwayBaseUrlClean ? `${railwayBaseUrlClean}/live-qa-csv?eventId=${encodeURIComponent(eventId)}` : '';
+  const railwayImportDataFormula = railwayLiveCsvUrl ? `=IMPORTDATA("${railwayLiveCsvUrl}")` : '';
+  const [sheetError, setSheetError] = useState<string | null>(null);
+  const [sheetSaveSuccess, setSheetSaveSuccess] = useState(false);
 
   useEffect(() => {
     if (!eventId) return;
@@ -76,26 +89,25 @@ export default function EventDetailPage() {
     if (!eventId || !event) return;
 
     setSavingSheet(true);
-    setError(null);
+    setSheetError(null);
 
+    const trimmedSheetUrl = sheetUrl.trim();
+    const trimmedWebAppUrl = webAppUrl.trim();
     try {
-      if (sheetUrl.trim()) {
-        const spreadsheetId = extractSpreadsheetId(sheetUrl);
+      if (trimmedSheetUrl) {
+        const spreadsheetId = extractSpreadsheetId(trimmedSheetUrl);
         if (!spreadsheetId) {
-          setError('Invalid Google Sheets URL. Please provide a valid spreadsheet URL.');
+          const msg = 'Invalid Google Sheet URL. Use the full link from the browser, e.g. https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit';
+          setSheetError(msg);
           setSavingSheet(false);
           return;
         }
-        try {
-          await initializeGoogleSheet(spreadsheetId);
-        } catch (sheetError) {
-          console.warn('Google Sheets initialization skipped:', sheetError);
-        }
       }
+      // Free plan script creates sheets when runLiveSync runs; no POST from app.
 
       await updateEvent(eventId, {
-        googleSheetUrl: sheetUrl.trim() || '',
-        googleSheetWebAppUrl: webAppUrl.trim() || '',
+        googleSheetUrl: trimmedSheetUrl || '',
+        googleSheetWebAppUrl: trimmedWebAppUrl || '',
         activeQASheetName: activeQASheetName.trim() || '',
         activeQACell: activeQACell.trim() || '',
       });
@@ -103,10 +115,13 @@ export default function EventDetailPage() {
       const updatedEvent = await getEvent(eventId);
       if (updatedEvent) {
         setEvent(updatedEvent);
-        setShowSheetForm(false);
+        setSheetSaveSuccess(true);
+        setSheetError(null);
+        // Keep form open so feedback stays in Google settings and does not change/cover the event page
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save Google Sheet URL');
+      const msg = err instanceof Error ? err.message : 'Failed to save Google Sheet URL';
+      setSheetError(msg);
     } finally {
       setSavingSheet(false);
     }
@@ -168,16 +183,39 @@ export default function EventDetailPage() {
     );
   }
 
-  if (error || !event) {
+  // Full-page error only when event failed to load or not found (no event data). All other messages stay on the page.
+  if (!event) {
+    const errorText = error || 'Event not found';
     return (
       <div className="min-h-screen bg-gray-100">
-        <div className="container mx-auto px-4 py-8">
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-            {error || 'Event not found'}
+        <div className="container mx-auto px-4 py-8 max-w-2xl">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-sm font-medium text-red-800 mb-2">Error (you can copy this message)</p>
+            <pre className="text-sm text-red-700 whitespace-pre-wrap break-all mb-3 p-3 bg-white border border-red-100 rounded select-all" style={{ maxHeight: '200px', overflow: 'auto' }}>
+              {errorText}
+            </pre>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(errorText);
+                } catch (_) {}
+              }}
+              className="mr-2 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+            >
+              Copy error
+            </button>
           </div>
-          <Link to="/" className="mt-4 inline-block text-blue-600 hover:text-blue-800">
-            ← Back to Events
-          </Link>
+          <div className="mt-4 flex gap-4">
+            <Link to="/" className="text-blue-600 hover:text-blue-800 font-medium">
+              ← Back to Events
+            </Link>
+            {eventId && (
+              <Link to={`/events/${eventId}`} className="text-blue-600 hover:text-blue-800 font-medium">
+                Back to this event
+              </Link>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -186,6 +224,13 @@ export default function EventDetailPage() {
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="container mx-auto px-4 py-8">
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex flex-wrap items-center gap-2">
+            <pre className="flex-1 min-w-0 text-sm text-red-700 whitespace-pre-wrap break-all" style={{ maxHeight: '120px', overflow: 'auto' }}>{error}</pre>
+            <button type="button" onClick={() => setError(null)} className="shrink-0 px-3 py-1.5 border border-red-300 text-red-700 rounded hover:bg-red-100">Dismiss</button>
+            <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(error); } catch (_) {} }} className="shrink-0 px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700">Copy</button>
+          </div>
+        )}
         <Link to="/" className="text-blue-600 hover:text-blue-800 mb-4 inline-block">
           ← Back to Events
         </Link>
@@ -210,7 +255,7 @@ export default function EventDetailPage() {
             </button>
           </div>
           
-          {/* Google Sheet Section */}
+          {/* Google Sheet Section - all feedback (success/error) only inside this section, never covers event page */}
           <div className="mt-4 pt-4 border-t border-gray-200">
             {!showSheetForm ? (
               <div className="flex items-center justify-between">
@@ -232,7 +277,7 @@ export default function EventDetailPage() {
                   )}
                 </div>
                 <button
-                  onClick={() => setShowSheetForm(true)}
+                  onClick={() => { setShowSheetForm(true); setSheetSaveSuccess(false); }}
                   className="text-blue-600 hover:text-blue-800 text-sm font-medium"
                 >
                   {event.googleSheetUrl ? 'Edit' : 'Add'} Sheet
@@ -240,17 +285,44 @@ export default function EventDetailPage() {
               </div>
             ) : (
               <div>
+                {sheetSaveSuccess && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md flex items-center justify-between">
+                    <p className="text-sm font-medium text-green-800">Settings saved.</p>
+                    <button type="button" onClick={() => setSheetSaveSuccess(false)} className="text-green-700 hover:text-green-900 text-sm font-medium">Dismiss</button>
+                  </div>
+                )}
+                {sheetError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p className="text-sm font-medium text-red-800 mb-1">Error (copy below to share or troubleshoot)</p>
+                    <pre className="text-xs text-red-700 whitespace-pre-wrap break-all mb-2 p-2 bg-white border border-red-100 rounded select-all" style={{ maxHeight: '120px', overflow: 'auto' }}>
+                      {sheetError}
+                    </pre>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(sheetError);
+                          setCopyFeedback('error');
+                          setTimeout(() => setCopyFeedback(null), 2000);
+                        } catch (_) {}
+                      }}
+                      className="text-sm px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+                    >
+                      {copyFeedback === 'error' ? 'Copied!' : 'Copy error'}
+                    </button>
+                  </div>
+                )}
                 <label htmlFor="sheet-url" className="block text-sm font-medium text-gray-700 mb-2">
                   Google Sheet URL
                 </label>
                 <div className="flex gap-2">
                   <input
                     id="sheet-url"
-                    type="url"
+                    type="text"
                     value={sheetUrl}
                     onChange={(e) => setSheetUrl(e.target.value)}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="https://docs.google.com/spreadsheets/d/..."
+                    placeholder="https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
                   />
                   <button
                     onClick={handleSaveSheetUrl}
@@ -262,6 +334,7 @@ export default function EventDetailPage() {
                   <button
                     onClick={() => {
                       setShowSheetForm(false);
+                      setSheetError(null);
                       setSheetUrl(event.googleSheetUrl || '');
                       setWebAppUrl(event.googleSheetWebAppUrl || '');
                       setActiveQASheetName(event.activeQASheetName || '');
@@ -278,13 +351,13 @@ export default function EventDetailPage() {
                     <label htmlFor="webapp-url" className="block text-sm font-medium text-gray-700 mb-1">Web App URL (for writing)</label>
                     <input
                       id="webapp-url"
-                      type="url"
+                      type="text"
                       value={webAppUrl}
                       onChange={(e) => setWebAppUrl(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="https://script.google.com/... (from Apps Script deploy as Web App)"
+                      placeholder="https://script.google.com/macros/s/.../exec"
                     />
-                    <p className="mt-0.5 text-xs text-gray-500">Deploy your sheet’s Apps Script as Web App and paste the URL here so the app can send poll results and active Q&A.</p>
+                    <p className="mt-0.5 text-xs text-gray-500">In the sheet: Extensions → Apps Script, paste the code from the script below (use &quot;Free plan&quot; for no Blaze/Web App). Copy the Web App URL here if using Web App script.</p>
                   </div>
                   <div className="flex gap-4 flex-wrap">
                     <div className="flex-1 min-w-[120px]">
@@ -311,6 +384,115 @@ export default function EventDetailPage() {
                     </div>
                   </div>
                   <p className="text-xs text-gray-500">The currently active Q&A question is written to this sheet/cell when it changes.</p>
+                </div>
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <p className="text-sm font-medium text-gray-700 mb-2">For the Free plan script CONFIG</p>
+                  <p className="text-xs text-gray-600 mb-1">Use the same API key as in your .env (VITE_FIREBASE_API_KEY). Event ID is below — copy it into CONFIG as LIVE_STATE_EVENT_ID.</p>
+                  {eventId && (
+                    <div className="flex flex-wrap items-center gap-2 mb-3 p-2 bg-gray-50 border border-gray-200 rounded">
+                      <span className="text-xs text-gray-600">Event ID:</span>
+                      <code className="text-sm font-mono bg-white px-2 py-1 border border-gray-200 rounded">{eventId}</code>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(eventId);
+                            setCopyFeedback('eventId');
+                            setTimeout(() => setCopyFeedback(null), 2000);
+                          } catch (_) {}
+                        }}
+                        className="text-xs px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700"
+                      >
+                        {copyFeedback === 'eventId' ? 'Copied!' : 'Copy Event ID'}
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-sm font-medium text-gray-700 mb-2">Copy script for your Google Sheet</p>
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <label className="text-xs text-gray-600">Script:</label>
+                    <select
+                      value={scriptVariant}
+                      onChange={(e) => setScriptVariant(e.target.value as 'webapp' | 'firestore' | 'firestore_simple' | 'blaze_url')}
+                      className="text-sm border border-gray-300 rounded px-2 py-1"
+                    >
+                      <option value="firestore">Free plan (full – standalone or sheet, with doGet/testAuth)</option>
+                      <option value="firestore_simple">Free plan (simple – sheet only, from docs)</option>
+                      <option value="blaze_url">No script – Live CSV URL (Blaze, no authorization)</option>
+                      <option value="webapp">Web App – needs Blaze + proxy or direct POST</option>
+                    </select>
+                    {scriptVariant !== 'blaze_url' && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const script = scriptVariant === 'firestore' ? GOOGLE_SHEET_SCRIPT_FIRESTORE : scriptVariant === 'firestore_simple' ? GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE : GOOGLE_SHEET_SCRIPT;
+                        try {
+                          await navigator.clipboard.writeText(script);
+                          setCopyFeedback('script');
+                          setScriptCopied(true);
+                          setTimeout(() => { setScriptCopied(false); setCopyFeedback(null); }, 2000);
+                        } catch (_) {
+                          setSheetError('Copy failed. Select and copy the script below manually.');
+                        }
+                      }}
+                      className="shrink-0 px-3 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-800"
+                    >
+                      {copyFeedback === 'script' ? 'Copied!' : 'Copy script'}
+                    </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mb-2">
+                    {scriptVariant === 'firestore'
+                      ? 'Full script: runs from sheet or standalone (script.google.com). CONFIG: API key, Event ID, optional SPREADSHEET_ID for standalone.'
+                      : scriptVariant === 'firestore_simple'
+                      ? 'Simple script (sheet only): create from the sheet (Extensions → Apps Script). CONFIG: API key and Event ID from above. Run testAuth first, then runLiveSync.'
+                      : scriptVariant === 'blaze_url'
+                      ? 'No Google Apps Script. Paste the formula in a cell; Sheets refreshes the CSV periodically. Requires Blaze (Cloud Functions). Blaze has a free tier — you may pay $0.'
+                      : 'Deploy as web app and paste the URL above. Works with Cloud Function proxy (Blaze plan) or may fail in browser (CORS).'}
+                  </p>
+                  {scriptVariant === 'firestore' && (
+                    <p className="text-xs text-amber-700 mb-2">
+                      <strong>Getting &quot;unknown error&quot;?</strong> Use STANDALONE: go to script.google.com → New project → paste this script. In CONFIG set <strong>SPREADSHEET_ID</strong> to the ID from your sheet URL (the part between /d/ and /edit). Then run testAuth, then runLiveSync. Use a personal Gmail if you can.
+                    </p>
+                  )}
+                  {scriptVariant === 'firestore_simple' && (
+                    <p className="text-xs text-amber-700 mb-2">
+                      <strong>Getting &quot;unknown error&quot;?</strong> Run <strong>testAuth</strong> first: in the script editor, open the function dropdown (next to Run), select <strong>testAuth</strong>, click Run. When the browser asks for permission, click Advanced → Go to … (unsafe) if you see &quot;This app isn&apos;t verified&quot;, then Allow. After that, run <strong>runLiveSync</strong>. Use a personal Gmail if you can.
+                    </p>
+                  )}
+                  {scriptVariant === 'blaze_url' && (
+                    <>
+                      <p className="text-xs text-gray-600 mb-2">1. Upgrade to Blaze in Firebase Console (pay-as-you-go; free tier usually $0). 2. Deploy once: <code className="bg-gray-100 px-1">firebase deploy --only functions</code>. 3. In your sheet, paste the formula below into a cell.</p>
+                      {liveCsvUrl && (
+                        <div className="space-y-2 mb-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs text-gray-600">Formula (paste in a cell):</span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(importDataFormula);
+                                  setCopyFeedback('script');
+                                  setTimeout(() => setCopyFeedback(null), 2000);
+                                } catch (_) { setSheetError('Copy failed.'); }
+                              }}
+                              className="text-xs px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                            >
+                              {copyFeedback === 'script' ? 'Copied!' : 'Copy formula'}
+                            </button>
+                          </div>
+                          <pre className="p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto font-mono whitespace-pre-wrap break-all">
+                            {importDataFormula}
+                          </pre>
+                          <p className="text-xs text-gray-500">Sheets will refresh this data periodically (e.g. every hour). No script, no authorization.</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {scriptVariant !== 'blaze_url' && (
+                  <pre className="mt-2 p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto max-h-64 font-mono whitespace-pre-wrap break-all">
+                    {scriptVariant === 'firestore' ? GOOGLE_SHEET_SCRIPT_FIRESTORE : scriptVariant === 'firestore_simple' ? GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE : GOOGLE_SHEET_SCRIPT}
+                  </pre>
+                  )}
                 </div>
               </div>
             )}

@@ -25,6 +25,11 @@ service cloud.firestore {
         allow update, delete: if false; // Prevent editing/deleting submissions
       }
     }
+
+    // Live state: written by Operators app, read by Google Apps Script (Firestore REST API) or CSV export. Free-plan friendly.
+    match /liveState/{eventId} {
+      allow read, write: if true;
+    }
   }
 }
 

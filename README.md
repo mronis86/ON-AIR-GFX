@@ -6,15 +6,43 @@ A Firebase-powered web application for managing broadcast graphics events and it
 
 - **Event Management**: Create and manage broadcast events with dates and Google Sheets integration
 - **Poll Creation**: Create polls with multiple types (Single Choice, Multiple Choice, Rating Scale, Yes/No) with up to 6 options
-- **Google Sheets Integration**: Automatically syncs data to Google Sheets for broadcast systems
-- **Real-time Updates**: Changes are immediately reflected in connected Google Sheets
-- **Live data webhook**: Optional URL (e.g. Google Apps Script Web App) to POST current active poll and Q&A as JSON whenever they change, so you can mirror data to a Google Sheet or other endpoint
+- **Google Sheets Integration**: Per-event Google Sheet target with Web App URL; polls and Q&A push to sub-sheets or a cell
+- **Real-time Updates**: Active poll results and active Q&A are POSTed to your Apps Script Web App when they change
 
-## Live data webhook (Google Sheet / external URL)
+## Google Sheet integration (event-level)
 
-In **Animation Settings** you can set a **Live data webhook** URL. When set, the app sends a POST request with JSON whenever the active poll or Q&A changes. Payload includes `timestamp`, `eventId`, `eventName`, `activePoll` (id, title, options), and `activeQA` (id, question, answer, submitterName).
+For each **event** you can set:
 
-**To send this data to a Google Sheet:** create a new Google Sheet, go to Extensions → Apps Script, and add a script that implements `doPost(e)`: parse `JSON.parse(e.postData.contents)` and append the fields you need to a sheet. Deploy the script as a Web App (Execute as: Me, Who has access: Anyone), copy the Web App URL, and paste it into the "Live data webhook" field in the app.
+- **Google Sheet URL** – link to the spreadsheet (for opening the sheet).
+- **Web App URL** – the “Deploy as Web app” URL from **Extensions → Apps Script** for that same spreadsheet. The app POSTs JSON to this URL so your script can write to the sheet.
+- **Active Q&A sub-sheet** and **cell** (e.g. `Live` / `A1`) – the currently active Q&A question is written to that cell when it changes.
+- Per **poll**, you can set a **target sheet tab**; the active poll’s full info and results are sent to that tab when it’s live.
+
+When you save the event with a **Web App URL**, the app sends an **initialize** request so your script can create default sub-sheets (Events, Polls, WebLinks, InfoBars, Boxes, Q&A) if they don’t exist.
+
+**Copy the full Apps Script:** In the app, open an event → Google Sheet section → **Copy script for your Google Sheet**. Paste that into your sheet (Extensions → Apps Script), then Deploy → Deploy as web app. Copy the Web App URL into the event’s **Web App URL** field. The app uses a Firebase proxy so saving works without “Failed to fetch”; deploy with `firebase deploy` (including `functions`) so the proxy is active.
+
+**Apps Script (Web App)** – implement `doPost(e)` and parse `JSON.parse(e.postData.contents)`:
+
+- **`type: 'initialize'`** – `sheetNames` array; create each sheet tab if it doesn’t exist (e.g. `Events`, `Polls`, `WebLinks`, `InfoBars`, `Boxes`, `Q&A`).
+- **`type: 'poll'`** – `subSheet`, `poll` (id, title, type, options, isActive); write poll data to the named tab.
+- **`type: 'qa_active'`** – `sheetName`, `cell`, `data` (question, answer, submitterName); write the active Q&A to that cell (empty strings when no active Q&A).
+
+Example **initialize** handler in Apps Script (creates missing tabs; add your own handling for `poll` and `qa_active`):
+
+```javascript
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (data.type === 'initialize' && data.sheetNames) {
+    data.sheetNames.forEach(function(name) {
+      if (!ss.getSheetByName(name)) ss.insertSheet(name);
+    });
+  }
+  return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+```
 
 ## Tech Stack
 
