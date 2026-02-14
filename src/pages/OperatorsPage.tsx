@@ -655,7 +655,14 @@ export default function OperatorsPage() {
       // Update Cue question to Active
       await updateQA(questionId, updates);
 
-      // Reload Q&A questions
+      // Optimistically update local state so live-state write (Railway CSV) runs immediately
+      setQAQuestions((prev) =>
+        prev.map((q) =>
+          q.id === questionId ? { ...q, isActive: true, isQueued: false, ...updates } : { ...q, isActive: false }
+        )
+      );
+
+      // Reload Q&A questions to sync with server
       if (selectedEventId) {
         const eventQAs = await getQAsByEvent(selectedEventId);
         const qaSubmissions = eventQAs.filter(qa => qa.question && !qa.name);
