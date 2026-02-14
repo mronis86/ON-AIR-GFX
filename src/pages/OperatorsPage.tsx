@@ -250,7 +250,9 @@ export default function OperatorsPage() {
     }
   }, [qaQuestions, activeQA?.id, previewVisible, previewOutput, qas, activePoll, qaAnimateInDelayMs]);
 
-  // Always write live state to Firestore (free plan: Google Apps Script can read from here and write to sheet)
+  // Always write live state to Firestore (free plan: Google Apps Script / Railway CSV read from here)
+  // Use any ACTIVE Q&A question for live state (not just the one chosen for preview output), so CSV/Sheets see it
+  const activeQAForLiveState = activeQA ?? qaQuestions.find((q) => q.isActive) ?? null;
   useEffect(() => {
     if (!selectedEventId || !selectedEvent) return;
     setLiveState(selectedEventId, {
@@ -263,11 +265,11 @@ export default function OperatorsPage() {
             googleSheetTab: activePoll.googleSheetTab,
           }
         : null,
-      activeQA: activeQA
+      activeQA: activeQAForLiveState
         ? {
-            question: activeQA.question ?? '',
-            answer: activeQA.answer ?? '',
-            submitterName: activeQA.submitterName ?? '',
+            question: activeQAForLiveState.question ?? '',
+            answer: activeQAForLiveState.answer ?? '',
+            submitterName: activeQAForLiveState.submitterName ?? '',
           }
         : null,
       pollSheetName: activePoll?.googleSheetTab?.trim() || undefined,
@@ -286,10 +288,10 @@ export default function OperatorsPage() {
     activePoll?.type,
     activePoll?.options,
     activePoll?.googleSheetTab,
-    activeQA?.id,
-    activeQA?.question,
-    activeQA?.answer,
-    activeQA?.submitterName,
+    activeQAForLiveState?.id,
+    activeQAForLiveState?.question,
+    activeQAForLiveState?.answer,
+    activeQAForLiveState?.submitterName,
   ]);
 
   // Optional: also POST to Web App when URL is set (works with Cloud Function proxy on Blaze plan)
