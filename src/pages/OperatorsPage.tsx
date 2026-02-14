@@ -1416,9 +1416,27 @@ export default function OperatorsPage() {
                   </div>
                 ) : selectedEvent ? (
                   <div>
-                    <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                    <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
                       {selectedEvent.name}
                     </h2>
+                    {selectedEventId && (
+                      <div className="flex flex-wrap items-center gap-2 mb-4 text-sm text-gray-400">
+                        <span>Event ID:</span>
+                        <code className="bg-gray-700 px-2 py-1 rounded font-mono text-gray-300">{selectedEventId}</code>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(selectedEventId);
+                            } catch (_) {}
+                          }}
+                          className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs"
+                        >
+                          Copy
+                        </button>
+                        <span className="text-gray-500">(use in Railway CSV URL and Sheets =IMPORTDATA)</span>
+                      </div>
+                    )}
 
                     {/* Navigation Menu */}
                     <div className="mb-6">

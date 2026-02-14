@@ -20,6 +20,7 @@ function escapeCsv(s) {
 async function getLiveState(eventId) {
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/liveState/${encodeURIComponent(eventId)}?key=${encodeURIComponent(API_KEY)}`;
   const res = await fetch(url);
+  if (res.status === 404) return {}; // No live state yet – app hasn't written for this event
   if (!res.ok) throw new Error(await res.text());
   const json = await res.json();
   return json.fields || {};
