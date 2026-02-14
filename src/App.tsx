@@ -7,6 +7,7 @@ import PublicEventPage from './pages/PublicEventPage';
 import PublicPollPage from './pages/PublicPollPage';
 import PublicQAPage from './pages/PublicQAPage';
 import QAModerationPage from './pages/QAModerationPage';
+import LiveDataExportPage from './pages/LiveDataExportPage';
 import './style.css';
 
 function NotFoundPage() {
@@ -34,6 +35,7 @@ function App() {
         <Route path="/poll/:pollId" element={<PublicPollPage />} />
         <Route path="/qa/:qaId" element={<PublicQAPage />} />
         <Route path="/events/:eventId/qa/moderation" element={<QAModerationPage />} />
+        <Route path="/events/:eventId/live-data" element={<LiveDataExportPage />} />
         {/* Catch-all route for debugging */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

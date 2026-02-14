@@ -6,8 +6,40 @@ function escapeCsv(s: string): string {
   return t.includes(',') || t.includes('"') || t.includes('\n') || t.includes('\r') ? `"${t}"` : t;
 }
 
+/** One Q&A item for CSV (question + name). */
+export interface QaCsvItem {
+  question: string;
+  submitterName?: string;
+}
+
+/**
+ * Build a CSV with 6 columns: Question ACTIVE, Name ACTIVE, Question Cue, Name Cue, Question Next, Name Next.
+ */
+export function buildLiveQaCsv6(data: {
+  active: QaCsvItem | null;
+  cue: QaCsvItem | null;
+  next: QaCsvItem | null;
+}): string {
+  const a = data.active;
+  const c = data.cue;
+  const n = data.next;
+  const rows: string[] = [
+    'Question ACTIVE,Name ACTIVE,Question Cue,Name Cue,Question Next,Name Next',
+    [
+      escapeCsv(a?.question ?? ''),
+      escapeCsv(a?.submitterName ?? ''),
+      escapeCsv(c?.question ?? ''),
+      escapeCsv(c?.submitterName ?? ''),
+      escapeCsv(n?.question ?? ''),
+      escapeCsv(n?.submitterName ?? ''),
+    ].join(','),
+  ];
+  return '\uFEFF' + rows.join('\r\n'); // BOM for Excel
+}
+
 /**
  * Build a CSV with only the active live Q&A (question, answer, submitter). One data row.
+ * @deprecated Use buildLiveQaCsv6 for new format.
  */
 export function buildLiveQaCsv(data: {
   activeQA: { question: string; answer?: string; submitterName?: string } | null;
@@ -15,17 +47,8 @@ export function buildLiveQaCsv(data: {
   updatedAt?: string;
 }): string {
   const q = data.activeQA;
-  const rows: string[] = [
-    'Question,Answer,Submitter,Event,Updated',
-    [
-      escapeCsv(q?.question ?? ''),
-      escapeCsv(q?.answer ?? ''),
-      escapeCsv(q?.submitterName ?? ''),
-      escapeCsv(data.eventName ?? ''),
-      escapeCsv(data.updatedAt ?? ''),
-    ].join(','),
-  ];
-  return '\uFEFF' + rows.join('\r\n'); // BOM for Excel
+  const active = q ? { question: q.question ?? '', submitterName: q.submitterName } : null;
+  return buildLiveQaCsv6({ active, cue: null, next: null });
 }
 
 /**

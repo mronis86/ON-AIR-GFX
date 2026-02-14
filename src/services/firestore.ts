@@ -26,6 +26,8 @@ export const liveStateCollection = 'liveState';
 export interface LiveStateData {
   activePoll: { id: string; title: string; type: string; options: Array<{ text: string; votes?: number }>; googleSheetTab?: string } | null;
   activeQA: { question: string; answer?: string; submitterName?: string } | null;
+  /** Q&A session ID to use for CSV export (ACTIVE, Cue, Next columns). Set via CSV button in Operators. */
+  csvSourceSessionId?: string | null;
   pollSheetName?: string;
   qaSheetName?: string;
   qaCell?: string;
@@ -33,7 +35,7 @@ export interface LiveStateData {
   updatedAt: unknown;
 }
 
-export const setLiveState = async (eventId: string, data: Omit<LiveStateData, 'updatedAt'>): Promise<void> => {
+export const setLiveState = async (eventId: string, data: Partial<Omit<LiveStateData, 'updatedAt'>>): Promise<void> => {
   const ref = doc(db, liveStateCollection, eventId);
   await setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true });
 };
@@ -109,14 +111,20 @@ export const updateEvent = async (eventId: string, updates: Partial<Event>): Pro
     else cleanUpdates.activeQACell = deleteField();
   }
   if (updates.publicLink !== undefined) {
-    // If it's undefined or empty string, delete the field
     if (updates.publicLink) {
       cleanUpdates.publicLink = updates.publicLink;
     } else {
       cleanUpdates.publicLink = deleteField();
     }
   }
-  
+  if (updates.railwayLiveCsvBaseUrl !== undefined) {
+    if (updates.railwayLiveCsvBaseUrl) {
+      cleanUpdates.railwayLiveCsvBaseUrl = updates.railwayLiveCsvBaseUrl;
+    } else {
+      cleanUpdates.railwayLiveCsvBaseUrl = deleteField();
+    }
+  }
+
   await updateDoc(docRef, cleanUpdates);
 };
 
@@ -144,6 +152,7 @@ export const createPoll = async (pollData: Omit<Poll, 'id' | 'createdAt' | 'upda
     ...pollData,
     options: optionsWithVotes,
     isActive: false,
+    isActiveForPublic: false,
     createdAt: now,
     updatedAt: now,
   };
@@ -192,6 +201,7 @@ export const updatePoll = async (pollId: string, updates: Partial<Poll>): Promis
   if (updates.title !== undefined) cleanUpdates.title = updates.title;
   if (updates.options !== undefined) cleanUpdates.options = updates.options;
   if (updates.isActive !== undefined) cleanUpdates.isActive = updates.isActive;
+  if (updates.isActiveForPublic !== undefined) cleanUpdates.isActiveForPublic = updates.isActiveForPublic;
   if (updates.displayType !== undefined) cleanUpdates.displayType = updates.displayType;
   if (updates.primaryColor !== undefined) cleanUpdates.primaryColor = updates.primaryColor;
   if (updates.secondaryColor !== undefined) cleanUpdates.secondaryColor = updates.secondaryColor;
@@ -391,6 +401,25 @@ export const getQAsByStatus = async (eventId: string, status: string): Promise<Q
   })) as QandA[];
 };
 
+/** Get questions (submissions) for a specific Q&A session.
+ * When includeOrphaned is true (e.g. event has only one session), questions without sessionId are included. */
+export const getQuestionsBySession = async (
+  sessionId: string,
+  eventId: string,
+  options?: { includeOrphaned?: boolean }
+): Promise<QandA[]> => {
+  const allQAs = await getQAsByEvent(eventId);
+  const submissions = allQAs.filter((qa) => {
+    if (!qa.question || qa.name) return false;
+    if (qa.sessionId === sessionId) return true;
+    if (options?.includeOrphaned && !qa.sessionId) return true; // Legacy questions before sessionId existed
+    return false;
+  });
+  return submissions.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+};
+
 export const updateQA = async (qaId: string, updates: Partial<QandA>): Promise<void> => {
   const docRef = doc(db, qaCollection, qaId);
   const cleanUpdates: Record<string, any> = {
@@ -403,6 +432,7 @@ export const updateQA = async (qaId: string, updates: Partial<QandA>): Promise<v
   if (updates.answer !== undefined) cleanUpdates.answer = updates.answer;
   if (updates.status !== undefined) cleanUpdates.status = updates.status;
   if (updates.isActive !== undefined) cleanUpdates.isActive = updates.isActive;
+  if (updates.isActiveForPublic !== undefined) cleanUpdates.isActiveForPublic = updates.isActiveForPublic;
   if (updates.isNext !== undefined) cleanUpdates.isNext = updates.isNext;
   if (updates.isQueued !== undefined) cleanUpdates.isQueued = updates.isQueued;
   if (updates.isDone !== undefined) cleanUpdates.isDone = updates.isDone;
@@ -564,6 +594,7 @@ export const submitPublicQuestion = async (
   const now = new Date().toISOString();
   const submissionData: Record<string, any> = {
     eventId: qaData.eventId,
+    sessionId: qaId, // Link to parent Q&A session
     name: '', // Empty name for submissions - they're questions, not sessions
     question: question.trim(),
     status: QAStatus.PENDING,

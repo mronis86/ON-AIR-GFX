@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { getEvent, getPollsByEvent, getQAsByEvent, updateEvent, updatePoll } from '../services/firestore';
+import { getEvent, getPollsByEvent, getQAsByEvent, updateEvent, updatePoll, deletePoll, deleteQA } from '../services/firestore';
 import { extractSpreadsheetId } from '../services/googleSheets';
 import { GOOGLE_SHEET_SCRIPT, GOOGLE_SHEET_SCRIPT_FIRESTORE, GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE } from '../constants/googleSheetScript';
 import type { Event, Poll, QandA } from '../types';
 import PollFormEnhanced from '../components/PollFormEnhanced';
 import QAForm from '../components/QAForm';
+import QASessionDetailModal from '../components/QASessionDetailModal';
 
 export default function EventDetailPage() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -19,6 +20,9 @@ export default function EventDetailPage() {
   const [showQAForm, setShowQAForm] = useState(false);
   const [editingQA, setEditingQA] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState<'polls' | 'qa' | 'other'>('polls');
+  const [selectedPollIds, setSelectedPollIds] = useState<Set<string>>(new Set());
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
+  const [sessionDetailSession, setSessionDetailSession] = useState<QandA | null>(null);
   const navigate = useNavigate();
   
   // Check for edit parameter in URL
@@ -39,11 +43,8 @@ export default function EventDetailPage() {
   const [savingPollTab, setSavingPollTab] = useState<string | null>(null);
   const [scriptCopied, setScriptCopied] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<'script' | 'error' | 'eventId' | null>(null);
-  const [scriptVariant, setScriptVariant] = useState<'webapp' | 'firestore' | 'firestore_simple' | 'blaze_url' | 'railway'>('firestore');
+  const [scriptVariant, setScriptVariant] = useState<'webapp' | 'firestore' | 'firestore_simple' | 'railway'>('railway');
   const [railwayBaseUrl, setRailwayBaseUrl] = useState('');
-  const projectId = (import.meta.env.VITE_FIREBASE_PROJECT_ID as string) || 'chamber-on-air-gfx';
-  const liveCsvUrl = eventId ? `https://us-central1-${projectId}.cloudfunctions.net/liveQaCsv?eventId=${encodeURIComponent(eventId)}` : '';
-  const importDataFormula = liveCsvUrl ? `=IMPORTDATA("${liveCsvUrl}")` : '';
   const railwayBaseUrlClean = railwayBaseUrl.trim().replace(/\/+$/, '');
   const railwayLiveCsvUrl = eventId && railwayBaseUrlClean ? `${railwayBaseUrlClean}/live-qa-csv?eventId=${encodeURIComponent(eventId)}` : '';
   const railwayImportDataFormula = railwayLiveCsvUrl ? `=IMPORTDATA("${railwayLiveCsvUrl}")` : '';
@@ -69,11 +70,14 @@ export default function EventDetailPage() {
 
         setEvent(eventData);
         setPolls(pollsData);
-        setQAs(qasData);
+        // Only store sessions (containers), not individual questions
+        const sessions = qasData.filter((qa) => qa.name && !qa.question);
+        setQAs(sessions);
         setSheetUrl(eventData.googleSheetUrl || '');
         setWebAppUrl(eventData.googleSheetWebAppUrl || '');
         setActiveQASheetName(eventData.activeQASheetName || '');
         setActiveQACell(eventData.activeQACell || '');
+        setRailwayBaseUrl(eventData.railwayLiveCsvBaseUrl || '');
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load event data');
@@ -110,6 +114,7 @@ export default function EventDetailPage() {
         googleSheetWebAppUrl: trimmedWebAppUrl || '',
         activeQASheetName: activeQASheetName.trim() || '',
         activeQACell: activeQACell.trim() || '',
+        railwayLiveCsvBaseUrl: railwayBaseUrl.trim().replace(/\/+$/, '') || undefined,
       });
 
       const updatedEvent = await getEvent(eventId);
@@ -139,16 +144,95 @@ export default function EventDetailPage() {
     }
   };
 
+  const handleToggleSelectPoll = (id: string) => {
+    setSelectedPollIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllPolls = () => {
+    if (selectedPollIds.size === polls.length) {
+      setSelectedPollIds(new Set());
+    } else {
+      setSelectedPollIds(new Set(polls.map((p) => p.id)));
+    }
+  };
+
+  const handleDeleteSelectedPolls = async () => {
+    if (selectedPollIds.size === 0) return;
+    if (!confirm(`Delete ${selectedPollIds.size} selected poll(s)? This cannot be undone.`)) return;
+    try {
+      for (const id of selectedPollIds) {
+        await deletePoll(id);
+      }
+      setSelectedPollIds(new Set());
+      if (editingPoll && selectedPollIds.has(editingPoll)) {
+        setEditingPoll(null);
+        setShowPollForm(false);
+      }
+      if (eventId) {
+        const pollsData = await getPollsByEvent(eventId);
+        setPolls(pollsData);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete polls');
+    }
+  };
+
   const handleQAFormSuccess = async () => {
     setShowQAForm(false);
     setEditingQA(null);
     if (eventId) {
       try {
         const qasData = await getQAsByEvent(eventId);
-        setQAs(qasData);
+        const sessions = qasData.filter((qa) => qa.name && !qa.question);
+        setQAs(sessions);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to reload Q&A');
       }
+    }
+  };
+
+  const qaSessions = qas; // qas is already filtered to sessions only
+
+  const handleToggleSelectSession = (id: string) => {
+    setSelectedSessionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllSessions = () => {
+    if (selectedSessionIds.size === qaSessions.length) {
+      setSelectedSessionIds(new Set());
+    } else {
+      setSelectedSessionIds(new Set(qaSessions.map((s) => s.id)));
+    }
+  };
+
+  const handleDeleteSelectedSessions = async () => {
+    if (selectedSessionIds.size === 0) return;
+    if (!confirm(`Delete ${selectedSessionIds.size} selected session(s)? Questions in these sessions will remain but won't be linked.`)) return;
+    try {
+      for (const id of selectedSessionIds) {
+        await deleteQA(id);
+      }
+      setSelectedSessionIds(new Set());
+      if (eventId) {
+        const qasData = await getQAsByEvent(eventId);
+        const sessions = qasData.filter((qa) => qa.name && !qa.question);
+        setQAs(sessions);
+        if (sessionDetailSession && selectedSessionIds.has(sessionDetailSession.id)) {
+          setSessionDetailSession(null);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete sessions');
     }
   };
 
@@ -339,6 +423,7 @@ export default function EventDetailPage() {
                       setWebAppUrl(event.googleSheetWebAppUrl || '');
                       setActiveQASheetName(event.activeQASheetName || '');
                       setActiveQACell(event.activeQACell || '');
+                      setRailwayBaseUrl(event.railwayLiveCsvBaseUrl || '');
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                   >
@@ -412,15 +497,15 @@ export default function EventDetailPage() {
                     <label className="text-xs text-gray-600">Script:</label>
                     <select
                       value={scriptVariant}
-                      onChange={(e) => setScriptVariant(e.target.value as 'webapp' | 'firestore' | 'firestore_simple' | 'blaze_url')}
+                      onChange={(e) => setScriptVariant(e.target.value as 'webapp' | 'firestore' | 'firestore_simple' | 'railway')}
                       className="text-sm border border-gray-300 rounded px-2 py-1"
                     >
+                      <option value="railway">Railway – Live CSV (no script, no Blaze)</option>
                       <option value="firestore">Free plan (full – standalone or sheet, with doGet/testAuth)</option>
                       <option value="firestore_simple">Free plan (simple – sheet only, from docs)</option>
-                      <option value="blaze_url">No script – Live CSV URL (Blaze, no authorization)</option>
                       <option value="webapp">Web App – needs Blaze + proxy or direct POST</option>
                     </select>
-                    {scriptVariant !== 'blaze_url' && (
+                    {scriptVariant !== 'railway' && (
                     <button
                       type="button"
                       onClick={async () => {
@@ -441,12 +526,12 @@ export default function EventDetailPage() {
                     )}
                   </div>
                   <p className="text-xs text-gray-500 mb-2">
-                    {scriptVariant === 'firestore'
+                    {scriptVariant === 'railway'
+                      ? 'Deploy the live-csv-server to Railway, paste your Railway URL below, then copy the formula into a cell. No Blaze, no Apps Script.'
+                      : scriptVariant === 'firestore'
                       ? 'Full script: runs from sheet or standalone (script.google.com). CONFIG: API key, Event ID, optional SPREADSHEET_ID for standalone.'
                       : scriptVariant === 'firestore_simple'
                       ? 'Simple script (sheet only): create from the sheet (Extensions → Apps Script). CONFIG: API key and Event ID from above. Run testAuth first, then runLiveSync.'
-                      : scriptVariant === 'blaze_url'
-                      ? 'No Google Apps Script. Paste the formula in a cell; Sheets refreshes the CSV periodically. Requires Blaze (Cloud Functions). Blaze has a free tier — you may pay $0.'
                       : 'Deploy as web app and paste the URL above. Works with Cloud Function proxy (Blaze plan) or may fail in browser (CORS).'}
                   </p>
                   {scriptVariant === 'firestore' && (
@@ -459,18 +544,28 @@ export default function EventDetailPage() {
                       <strong>Getting &quot;unknown error&quot;?</strong> Run <strong>testAuth</strong> first: in the script editor, open the function dropdown (next to Run), select <strong>testAuth</strong>, click Run. When the browser asks for permission, click Advanced → Go to … (unsafe) if you see &quot;This app isn&apos;t verified&quot;, then Allow. After that, run <strong>runLiveSync</strong>. Use a personal Gmail if you can.
                     </p>
                   )}
-                  {scriptVariant === 'blaze_url' && (
-                    <>
-                      <p className="text-xs text-gray-600 mb-2">1. Upgrade to Blaze in Firebase Console (pay-as-you-go; free tier usually $0). 2. Deploy once: <code className="bg-gray-100 px-1">firebase deploy --only functions</code>. 3. In your sheet, paste the formula below into a cell.</p>
-                      {liveCsvUrl && (
-                        <div className="space-y-2 mb-2">
+                  {scriptVariant === 'railway' && (
+                    <div className="space-y-3 mb-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Railway CSV server URL</label>
+                        <input
+                          type="text"
+                          value={railwayBaseUrl}
+                          onChange={(e) => setRailwayBaseUrl(e.target.value)}
+                          placeholder="https://your-app.up.railway.app"
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Paste your Railway app URL (from Railway dashboard → Domains). Save above to persist.</p>
+                      </div>
+                      {railwayImportDataFormula && (
+                        <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-xs text-gray-600">Formula (paste in a cell):</span>
                             <button
                               type="button"
                               onClick={async () => {
                                 try {
-                                  await navigator.clipboard.writeText(importDataFormula);
+                                  await navigator.clipboard.writeText(railwayImportDataFormula);
                                   setCopyFeedback('script');
                                   setTimeout(() => setCopyFeedback(null), 2000);
                                 } catch (_) { setSheetError('Copy failed.'); }
@@ -480,15 +575,15 @@ export default function EventDetailPage() {
                               {copyFeedback === 'script' ? 'Copied!' : 'Copy formula'}
                             </button>
                           </div>
-                          <pre className="p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto font-mono whitespace-pre-wrap break-all">
-                            {importDataFormula}
+                          <pre className="p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto font-mono whitespace-pre-wrap break-all mt-1">
+                            {railwayImportDataFormula}
                           </pre>
-                          <p className="text-xs text-gray-500">Sheets will refresh this data periodically (e.g. every hour). No script, no authorization.</p>
+                          <p className="text-xs text-gray-500">Sheets refreshes periodically. See docs/Railway-Deploy-Step-by-Step.md.</p>
                         </div>
                       )}
-                    </>
+                    </div>
                   )}
-                  {scriptVariant !== 'blaze_url' && (
+                  {scriptVariant !== 'railway' && (
                   <pre className="mt-2 p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto max-h-64 font-mono whitespace-pre-wrap break-all">
                     {scriptVariant === 'firestore' ? GOOGLE_SHEET_SCRIPT_FIRESTORE : scriptVariant === 'firestore_simple' ? GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE : GOOGLE_SHEET_SCRIPT}
                   </pre>
@@ -549,12 +644,31 @@ export default function EventDetailPage() {
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-semibold text-gray-700">Polls</h2>
-            <button
-              onClick={() => setShowPollForm(!showPollForm)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
-            >
-              {showPollForm ? 'Cancel' : '+ New Poll'}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowPollForm(!showPollForm)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+              >
+                {showPollForm ? 'Cancel' : '+ New Poll'}
+              </button>
+              {polls.length > 0 && (
+                <>
+                  <button
+                    onClick={handleSelectAllPolls}
+                    className="px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    {selectedPollIds.size === polls.length ? 'Deselect all' : 'Select all'}
+                  </button>
+                  <button
+                    onClick={handleDeleteSelectedPolls}
+                    disabled={selectedPollIds.size === 0}
+                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Delete selected ({selectedPollIds.size})
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {showPollForm && !editingPoll && (
@@ -604,8 +718,16 @@ export default function EventDetailPage() {
                   key={poll.id}
                   className="bg-white rounded-lg shadow-md p-6"
                 >
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1">
+                  <div className="flex items-start gap-4">
+                    <label className="flex items-center pt-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedPollIds.has(poll.id)}
+                        onChange={() => handleToggleSelectPoll(poll.id)}
+                        className="rounded border-gray-300"
+                      />
+                    </label>
+                    <div className="flex-1 min-w-0">
                       <h3 className="text-xl font-semibold text-gray-800">{poll.title}</h3>
                       <div className="flex gap-2 mt-1">
                         <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
@@ -618,15 +740,17 @@ export default function EventDetailPage() {
                         )}
                       </div>
                     </div>
-                    <button
-                      onClick={() => {
-                        setEditingPoll(poll.id);
-                        setShowPollForm(false);
-                      }}
-                      className="ml-4 px-3 py-1 text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50 transition-colors text-sm"
-                    >
-                      Edit
-                    </button>
+                    <div className="shrink-0">
+                      <button
+                        onClick={() => {
+                          setEditingPoll(poll.id);
+                          setShowPollForm(false);
+                        }}
+                        className="px-3 py-1 text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50 transition-colors text-sm"
+                      >
+                        Edit
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-4">
                     <p className="text-sm font-medium text-gray-700 mb-2">Options:</p>
@@ -688,7 +812,7 @@ export default function EventDetailPage() {
         {selectedTab === 'qa' && (
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-semibold text-gray-700">Q&A</h2>
+            <h2 className="text-2xl font-semibold text-gray-700">Q&A Sessions</h2>
             <div className="flex gap-2">
               <button
                 onClick={() => navigate(`/events/${eventId}/qa/moderation`)}
@@ -700,8 +824,25 @@ export default function EventDetailPage() {
                 onClick={() => setShowQAForm(!showQAForm)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
               >
-                {showQAForm ? 'Cancel' : '+ New Q&A'}
+                {showQAForm ? 'Cancel' : '+ New Session'}
               </button>
+              {qaSessions.length > 0 && (
+                <>
+                  <button
+                    onClick={handleSelectAllSessions}
+                    className="px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    {selectedSessionIds.size === qaSessions.length ? 'Deselect all' : 'Select all'}
+                  </button>
+                  <button
+                    onClick={handleDeleteSelectedSessions}
+                    disabled={selectedSessionIds.size === 0}
+                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Delete selected ({selectedSessionIds.size})
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -719,7 +860,7 @@ export default function EventDetailPage() {
             <div className="mb-6">
               <QAForm
                 eventId={event.id}
-                qa={qas.find(q => q.id === editingQA) || undefined}
+                qa={qaSessions.find((q) => q.id === editingQA) || undefined}
                 onSuccess={handleQAFormSuccess}
                 onCancel={() => {
                   setEditingQA(null);
@@ -729,72 +870,64 @@ export default function EventDetailPage() {
             </div>
           )}
 
-          {qas.length === 0 ? (
+          {qaSessions.length === 0 ? (
             <div className="bg-white rounded-lg shadow-md p-6 text-center text-gray-500">
-              <p>No Q&A items yet. Create your first Q&A!</p>
+              <p>No Q&A sessions yet. Create your first session!</p>
+              <p className="text-sm mt-2">Sessions collect questions from the public event page. Click a session to view and manage its questions.</p>
             </div>
           ) : (
             <div className="grid gap-4">
-              {qas.map((qa) => (
+              {qaSessions.map((session) => (
                 <div
-                  key={qa.id}
-                  className="bg-white rounded-lg shadow-md p-6"
+                  key={session.id}
+                  className="bg-white rounded-lg shadow-md p-6 flex items-start gap-4"
                 >
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1">
-                      <h3 className="text-xl font-semibold text-gray-800 mb-2">{qa.name || qa.question || 'Untitled Q&A'}</h3>
-                      <div className="flex gap-2 mt-1 mb-2">
-                        <span className={`text-sm px-2 py-1 rounded ${
-                          qa.status === 'approved' 
-                            ? 'bg-green-100 text-green-800' 
-                            : qa.status === 'rejected'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {qa.status}
-                        </span>
-                        {qa.isActive && (
-                          <span className="text-sm bg-green-100 text-green-800 px-2 py-1 rounded">Active</span>
-                        )}
-                        {qa.isNext && (
-                          <span className="text-sm bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Next</span>
-                        )}
-                      </div>
-                      {qa.answer && (
-                        <p className="text-gray-600 mt-2">{qa.answer}</p>
-                      )}
-                      {qa.submitterName && (
-                        <p className="text-sm text-gray-500 mt-2">— {qa.submitterName}</p>
-                      )}
-                      {qa.collectName !== false || qa.collectEmail !== false ? (
-                        <div className="mt-3 pt-3 border-t border-gray-200">
-                          <p className="text-xs font-medium text-gray-700 mb-1">
-                            Submission Form Fields:
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {qa.collectName ? 'Name' : ''} {qa.collectName && qa.collectEmail ? '+ ' : ''} {qa.collectEmail ? 'Email' : ''} {qa.allowAnonymous ? '(Anonymous allowed)' : ''}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-1 italic">
-                            Available on the public event page
-                          </p>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <button
-                        onClick={() => {
-                          setEditingQA(qa.id);
-                          setShowQAForm(false);
-                        }}
-                        className="px-3 py-1 text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50 transition-colors text-sm"
-                      >
-                        Edit
-                      </button>
-                    </div>
+                  <label className="flex items-center pt-1">
+                    <input
+                      type="checkbox"
+                      checked={selectedSessionIds.has(session.id)}
+                      onChange={() => handleToggleSelectSession(session.id)}
+                      className="rounded border-gray-300"
+                    />
+                  </label>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-xl font-semibold text-gray-800">{session.name || 'Untitled Session'}</h3>
+                    {(session.collectName !== false || session.collectEmail !== false) && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Collects: {session.collectName ? 'Name' : ''}{session.collectName && session.collectEmail ? ' + ' : ''}{session.collectEmail ? 'Email' : ''}
+                        {session.allowAnonymous ? ' (anonymous allowed)' : ''}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2 shrink-0">
+                    <button
+                      onClick={() => setSessionDetailSession(session)}
+                      className="px-3 py-1.5 text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50 transition-colors text-sm"
+                    >
+                      View questions
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingQA(session.id);
+                        setShowQAForm(false);
+                      }}
+                      className="px-3 py-1 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors text-sm"
+                    >
+                      Edit
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
+          )}
+
+          {sessionDetailSession && eventId && (
+            <QASessionDetailModal
+              session={sessionDetailSession}
+              eventId={eventId}
+              includeOrphaned={qaSessions.length === 1}
+              onClose={() => setSessionDetailSession(null)}
+            />
           )}
         </div>
         )}

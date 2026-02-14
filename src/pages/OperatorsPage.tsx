@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAllEvents, getEvent, getPollsByEvent, getQAsByEvent, updatePoll, updateQA, setLiveState } from '../services/firestore';
+import { getAllEvents, getEvent, getPollsByEvent, getQAsByEvent, getLiveState, updatePoll, updateQA, setLiveState } from '../services/firestore';
 import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
 import { getAnimationClasses, getTransitionInClass, afterDelayThenPaint, saveAnimationSettings, getAnimationSettings } from '../utils/animations';
 import { postToWebApp } from '../services/googleSheets';
-import { buildLiveQaCsv, downloadCsv } from '../utils/liveDataCsv';
+import { buildLiveQaCsv6, downloadCsv } from '../utils/liveDataCsv';
 
 const OPERATOR_PASSWORD = '1615';
 
@@ -57,6 +57,7 @@ export default function OperatorsPage() {
   const activeQARef = useRef<string | null>(null); // Track active QA ID to prevent unnecessary updates
   const qaAnimateInScheduledRef = useRef(false); // True while delayed animate-in is pending; prevents effect from showing immediately
   const pollAnimateInScheduledRef = useRef(false); // Same for poll animate-in
+  const hasUserPressedPlayQARef = useRef(false); // Only show Q&A preview after user clicks Play this session (avoids flash on refresh when Firestore still has isActive)
   const [editingPollId, setEditingPollId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedItemType, setSelectedItemType] = useState<ItemType>('polls');
@@ -75,9 +76,29 @@ export default function OperatorsPage() {
   const [qaAnimateInDelayMs, setQAAnimateInDelayMs] = useState(initialAnimationSettings.qaAnimateInDelayMs ?? 100);
   const [showOutputOptions, setShowOutputOptions] = useState(false);
   const [expandedPollId, setExpandedPollId] = useState<string | null>(null);
+  const [csvSourceSessionId, setCsvSourceSessionId] = useState<string | null>(null);
   const [expandedQAId, setExpandedQAId] = useState<string | null>(null);
   const [previewOutput, setPreviewOutput] = useState<number>(1); // Output 1-4 for preview
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0); // Increment to force iframe reload
+  const [windowSize, setWindowSize] = useState({ w: typeof window !== 'undefined' ? window.innerWidth : 1920, h: typeof window !== 'undefined' ? window.innerHeight : 1080 });
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const onResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Preview size constrained to viewport, keeping 16:9
+  const previewConstrained = (() => {
+    const maxW = windowSize.w * 0.9;
+    const maxH = (windowSize.h - 40) * 0.9;
+    const maxContentH = maxH - 40;
+    const maxWByHeight = (maxContentH * 16) / 9;
+    const w = Math.min(previewSize.width, maxW, maxWByHeight);
+    const h = Math.min(previewSize.height, (w * 9) / 16, maxContentH);
+    return { width: Math.round(w), height: Math.round(h) };
+  })();
 
   useEffect(() => {
     // Check if already authenticated (stored in sessionStorage)
@@ -190,6 +211,8 @@ export default function OperatorsPage() {
       });
       
       if (active) {
+        // Only show Q&A preview if user has pressed Play this session (avoids flash on refresh when Firestore still has isActive)
+        if (!hasUserPressedPlayQARef.current) return;
         // Only update if it's a different Q&A or output changed
         if (!activeQA || activeQA.id !== active.id) {
           // If switching from one Q&A to another, animate out first
@@ -223,18 +246,34 @@ export default function OperatorsPage() {
           setPreviewVisible(true);
         }
       } else {
-        // If no active Q&A, animate out if there was one visible
-        if (activeQA && previewVisible) {
+        // No question matched "active" (isActive + outputSettings for this preview output).
+        // Only clear if there is no active Q&A at all; if our current activeQA is still isActive
+        // (e.g. outputSettings not loaded yet), keep showing preview.
+        const hasAnyActive = qaQuestions.some((q) => q.isActive);
+        const currentStillActive = activeQA && qaQuestions.some((q) => q.id === activeQA.id && q.isActive);
+        if (!hasAnyActive) {
+          if (activeQA && previewVisible) {
+            setPreviewVisible(false);
+            setQAAnimatingIn(false);
+            setTimeout(() => {
+              setActiveQA(null);
+              setQAAnimatingIn(false);
+            }, 500);
+          } else if (!activeQA) {
+            setActiveQA(null);
+            setQAAnimatingIn(false);
+            setPreviewVisible(false);
+          }
+        } else if (activeQA && !currentStillActive && previewVisible) {
           setPreviewVisible(false);
           setQAAnimatingIn(false);
           setTimeout(() => {
             setActiveQA(null);
             setQAAnimatingIn(false);
           }, 500);
-        } else if (!activeQA) {
-          setActiveQA(null);
-          setQAAnimatingIn(false);
-          setPreviewVisible(false);
+        } else if (hasAnyActive && currentStillActive && activeQA && (!previewVisible || !qaAnimatingIn)) {
+          setPreviewVisible(true);
+          setQAAnimatingIn(true);
         }
       }
     } else {
@@ -272,6 +311,7 @@ export default function OperatorsPage() {
             submitterName: activeQAForLiveState.submitterName ?? '',
           }
         : null,
+      csvSourceSessionId: csvSourceSessionId ?? undefined,
       pollSheetName: activePoll?.googleSheetTab?.trim() || undefined,
       qaSheetName: selectedEvent?.activeQASheetName?.trim() || undefined,
       qaCell: selectedEvent?.activeQACell?.trim() || undefined,
@@ -283,6 +323,7 @@ export default function OperatorsPage() {
     selectedEvent?.name,
     selectedEvent?.activeQASheetName,
     selectedEvent?.activeQACell,
+    csvSourceSessionId,
     activePoll?.id,
     activePoll?.title,
     activePoll?.type,
@@ -505,6 +546,13 @@ export default function OperatorsPage() {
       setPolls(eventPolls);
       setQAs(qaSessions);
       setQAQuestions(qaSubmissions);
+      // Clear Q&A preview so we don't flash it on load when Firestore still has isActive from before refresh
+      setActiveQA(null);
+      setQAAnimatingIn(false);
+      hasUserPressedPlayQARef.current = false;
+
+      const liveState = await getLiveState(eventId);
+      setCsvSourceSessionId(liveState?.csvSourceSessionId ?? null);
       
       // Find active poll for preview
       const active = eventPolls.find((p) => p.isActive);
@@ -525,14 +573,23 @@ export default function OperatorsPage() {
 
   const handleActivatePoll = async (pollId: string) => {
     try {
-      await updatePoll(pollId, {
-        isActive: true,
-      });
+      // Only one Poll or Q&A play at a time: deactivate all Q&A first
+      if (selectedEventId) {
+        const eventQAs = await getQAsByEvent(selectedEventId);
+        const activeSession = eventQAs.find((q) => q.name && !q.question && q.isActive);
+        const activeQuestion = eventQAs.find((q) => q.question && q.isActive);
+        if (activeSession) await updateQA(activeSession.id, { isActive: false });
+        if (activeQuestion) await updateQA(activeQuestion.id, { isActive: false, isQueued: false });
+      }
+      await updatePoll(pollId, { isActive: true });
 
-      // Reload polls - the useEffect will handle the animation
       if (selectedEventId) {
         const eventPolls = await getPollsByEvent(selectedEventId);
+        const eventQAs = await getQAsByEvent(selectedEventId);
         setPolls(eventPolls);
+        setQAs(eventQAs.filter((q) => q.name && !q.question));
+        setQAQuestions(eventQAs.filter((q) => q.question && !q.name));
+        setActiveQA(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to activate poll');
@@ -569,6 +626,14 @@ export default function OperatorsPage() {
 
   const handleActivateQA = async (qaId: string) => {
     try {
+      // Only one Poll or Q&A play at a time: deactivate active poll first
+      const activeP = polls.find((p) => p.isActive);
+      if (activeP) {
+        await updatePoll(activeP.id, { isActive: false });
+        const eventPolls = await getPollsByEvent(selectedEventId!);
+        setPolls(eventPolls);
+        setActivePoll(null);
+      }
       // Check if there's a Cued question - if so, activate it instead of the session
       const cuedQuestion = qaQuestions.find(q => q.isQueued);
       if (cuedQuestion) {
@@ -592,6 +657,50 @@ export default function OperatorsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to activate Q&A');
       console.error('Error activating Q&A:', err);
+    }
+  };
+
+  const handleSetPollActiveForPublic = async (pollId: string) => {
+    const poll = polls.find((p) => p.id === pollId);
+    if (!poll) return;
+    const next = !(poll.isActiveForPublic === true);
+    try {
+      await updatePoll(pollId, { isActiveForPublic: next });
+      if (selectedEventId) {
+        const eventPolls = await getPollsByEvent(selectedEventId);
+        setPolls(eventPolls);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update poll');
+    }
+  };
+
+  const handleSetCSVSource = async (qaId: string) => {
+    if (!selectedEventId) return;
+    const isAlready = csvSourceSessionId === qaId;
+    const next = isAlready ? null : qaId;
+    setCsvSourceSessionId(next);
+    try {
+      await setLiveState(selectedEventId, { csvSourceSessionId: next });
+    } catch (err) {
+      setCsvSourceSessionId(csvSourceSessionId);
+      setError(err instanceof Error ? err.message : 'Failed to set CSV source');
+    }
+  };
+
+  const handleSetQAActiveForPublic = async (qaId: string) => {
+    const qa = qas.find((q) => q.id === qaId);
+    if (!qa) return;
+    const next = !(qa.isActiveForPublic === true);
+    try {
+      await updateQA(qaId, { isActiveForPublic: next });
+      if (selectedEventId) {
+        const eventQAs = await getQAsByEvent(selectedEventId);
+        const qaSessions = eventQAs.filter((q) => q.name && !q.question);
+        setQAs(qaSessions);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update Q&A session');
     }
   };
 
@@ -665,7 +774,10 @@ export default function OperatorsPage() {
       );
 
       // Show in preview/outputs immediately (same as Download CSV)
+      hasUserPressedPlayQARef.current = true;
       setActiveQA(activeQuestion);
+      setPreviewVisible(true);
+      setQAAnimatingIn(true);
 
       // Write live state to Firestore immediately (Railway CSV / Sheets)
       if (selectedEventId && selectedEvent) {
@@ -695,11 +807,18 @@ export default function OperatorsPage() {
       if (selectedEventId) {
         const eventQAs = await getQAsByEvent(selectedEventId);
         const qaSubmissions = eventQAs.filter(qa => qa.question && !qa.name);
-        setQAQuestions((prev) =>
-          qaSubmissions.map((q) =>
-            q.id === questionId ? { ...q, isActive: true, isQueued: false } : { ...q, isActive: false }
-          )
-        );
+        const defaultOutputs = { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
+        setQAQuestions((prev) => {
+          const prevActive = prev.find((q) => q.id === questionId);
+          const outputSettings = prevActive?.outputSettings && Object.keys(prevActive.outputSettings).length > 0
+            ? prevActive.outputSettings
+            : defaultOutputs;
+          return qaSubmissions.map((q) =>
+            q.id === questionId
+              ? { ...q, isActive: true, isQueued: false, outputSettings: q.outputSettings && Object.keys(q.outputSettings).length > 0 ? q.outputSettings : outputSettings }
+              : { ...q, isActive: false }
+          );
+        });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to activate question');
@@ -1021,22 +1140,26 @@ export default function OperatorsPage() {
     }
   }, [isDragging, isResizing, dragStart, previewPosition]);
 
-  // Update preview position when window resizes (if not being dragged)
+  // Reposition preview when window resizes so it stays in view (right-aligned)
   useEffect(() => {
-    if (showPreviewPopup && !isDragging) {
-      const updatePosition = () => {
-        const rightMargin = 20;
-        const topMargin = 80;
-        setPreviewPosition({
-          x: window.innerWidth - previewSize.width - rightMargin,
-          y: topMargin,
-        });
-      };
-      
-      window.addEventListener('resize', updatePosition);
-      return () => window.removeEventListener('resize', updatePosition);
-    }
-  }, [showPreviewPopup, previewSize.width, isDragging]);
+    if (!showPreviewPopup || isDragging) return;
+    const updatePosition = () => {
+      const rightMargin = 20;
+      const topMargin = 80;
+      const maxW = window.innerWidth * 0.9;
+      const maxH = (window.innerHeight - 40) * 0.9;
+      const maxContentH = maxH - 40;
+      const maxWByHeight = (maxContentH * 16) / 9;
+      const w = Math.min(previewSize.width, maxW, maxWByHeight);
+      setPreviewPosition({
+        x: window.innerWidth - w - rightMargin,
+        y: topMargin,
+      });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    return () => window.removeEventListener('resize', updatePosition);
+  }, [showPreviewPopup, previewSize.width, windowSize.w, windowSize.h, isDragging]);
 
   // Helper function to get animation classes
 
@@ -1141,14 +1264,21 @@ export default function OperatorsPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    const csv = buildLiveQaCsv({
-                      activeQA: activeQA ? { question: activeQA.question ?? '', answer: activeQA.answer ?? '', submitterName: activeQA.submitterName ?? '' } : null,
-                      eventName: selectedEvent?.name,
+                    const sessionQuestions = csvSourceSessionId
+                      ? qaQuestions.filter((q) => q.sessionId === csvSourceSessionId)
+                      : qaQuestions;
+                    const active = sessionQuestions.find((q) => q.isActive) ?? null;
+                    const cue = sessionQuestions.find((q) => q.isQueued) ?? null;
+                    const next = sessionQuestions.find((q) => q.isNext) ?? null;
+                    const csv = buildLiveQaCsv6({
+                      active: active ? { question: active.question ?? '', submitterName: active.submitterName } : null,
+                      cue: cue ? { question: cue.question ?? '', submitterName: cue.submitterName } : null,
+                      next: next ? { question: next.question ?? '', submitterName: next.submitterName } : null,
                     });
                     downloadCsv(`live-qa-${selectedEventId}.csv`, csv);
                   }}
                   className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2"
-                  title="Download active live Q&A as CSV (Question, Answer, Submitter)"
+                  title="Download CSV (Question ACTIVE, Name ACTIVE, Question Cue, Name Cue, Question Next, Name Next)"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1587,12 +1717,24 @@ export default function OperatorsPage() {
                                   : 'border-gray-600 bg-gray-700/50'
                               }`}
                             >
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2 flex-1">
+                              <div className="flex items-center justify-between mb-2 gap-4">
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
                                   <PollIcon />
-                                  <h4 className="font-semibold text-white">{poll.title}</h4>
+                                  <h4 className="font-semibold text-white truncate">{poll.title}</h4>
                                 </div>
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {/* Active for public link - separate from Play */}
+                                  <button
+                                    onClick={() => handleSetPollActiveForPublic(poll.id)}
+                                    className={`px-3 py-2 rounded-lg transition-colors text-sm font-medium border ${
+                                      poll.isActiveForPublic === true
+                                        ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500'
+                                        : 'bg-gray-700 hover:bg-gray-600 text-gray-300 border-amber-500/50'
+                                    }`}
+                                    title="Show on public event page (voting)"
+                                  >
+                                    Public
+                                  </button>
                                   {/* Play button - always visible */}
                                   <button
                                     onClick={() => handleActivatePoll(poll.id)}
@@ -1601,13 +1743,12 @@ export default function OperatorsPage() {
                                         ? 'bg-green-700 hover:bg-green-600'
                                         : 'bg-green-600 hover:bg-green-700'
                                     }`}
-                                    title="Activate (Animate In)"
+                                    title="Play (Animate In)"
                                   >
                                     <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
                                       <path d="M8 5v14l11-7z"/>
                                     </svg>
                                   </button>
-                                  
                                   {/* Stop button - always visible */}
                                   <button
                                     onClick={() => handleDeactivatePoll(poll.id)}
@@ -1616,7 +1757,7 @@ export default function OperatorsPage() {
                                         ? 'bg-red-600 hover:bg-red-700'
                                         : 'bg-red-700 hover:bg-red-600'
                                     }`}
-                                    title="Deactivate (Animate Out)"
+                                    title="Stop (Animate Out)"
                                   >
                                     <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
                                       <path d="M6 6h12v12H6z"/>
@@ -1841,12 +1982,36 @@ export default function OperatorsPage() {
                                       : 'border-gray-600 bg-gray-700/50'
                                   }`}
                                 >
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2 flex-1">
+                                  <div className="flex items-center justify-between mb-2 gap-4">
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
                                       <QAIcon />
-                                      <h4 className="font-semibold text-white">{qa.name || 'Q&A Session'}</h4>
+                                      <h4 className="font-semibold text-white truncate">{qa.name || 'Q&A Session'}</h4>
                                     </div>
-                                    <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      {/* Active for public link - separate from Play */}
+                                      <button
+                                        onClick={() => handleSetQAActiveForPublic(qa.id)}
+                                        className={`px-3 py-2 rounded-lg transition-colors text-sm font-medium border ${
+                                          qa.isActiveForPublic === true
+                                            ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500'
+                                            : 'bg-gray-700 hover:bg-gray-600 text-gray-300 border-amber-500/50'
+                                        }`}
+                                        title="Show on public event page (submissions)"
+                                      >
+                                        Public
+                                      </button>
+                                      {/* CSV source - which session's ACTIVE/Cue/Next to export */}
+                                      <button
+                                        onClick={() => handleSetCSVSource(qa.id)}
+                                        className={`px-3 py-2 rounded-lg transition-colors text-sm font-medium border ${
+                                          csvSourceSessionId === qa.id
+                                            ? 'bg-cyan-600 hover:bg-cyan-500 text-white border-cyan-500'
+                                            : 'bg-gray-700 hover:bg-gray-600 text-gray-300 border-cyan-500/50'
+                                        }`}
+                                        title="Use this session for CSV export (ACTIVE, Cue, Next)"
+                                      >
+                                        CSV
+                                      </button>
                                       {/* Play button - always visible */}
                                       <button
                                         onClick={() => handleActivateQA(qa.id)}
@@ -1855,13 +2020,12 @@ export default function OperatorsPage() {
                                             ? 'bg-green-700 hover:bg-green-600'
                                             : 'bg-green-600 hover:bg-green-700'
                                         }`}
-                                        title="Activate (Animate In)"
+                                        title="Play (Animate In)"
                                       >
                                         <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
                                           <path d="M8 5v14l11-7z"/>
                                         </svg>
                                       </button>
-                                      
                                       {/* Stop button - always visible */}
                                       <button
                                         onClick={() => handleDeactivateQA(qa.id)}
@@ -1870,7 +2034,7 @@ export default function OperatorsPage() {
                                             ? 'bg-red-600 hover:bg-red-700'
                                             : 'bg-red-700 hover:bg-red-600'
                                         }`}
-                                        title="Deactivate (Animate Out)"
+                                        title="Stop (Animate Out)"
                                       >
                                         <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
                                           <path d="M6 6h12v12H6z"/>
@@ -2094,14 +2258,16 @@ export default function OperatorsPage() {
       {/* Preview Popup Window */}
       {showPreviewPopup && (
         <div
-          className="fixed bg-gray-800 border-2 border-gray-600 rounded-lg shadow-2xl z-50"
+          className="fixed bg-gray-800 border-2 border-gray-600 rounded-lg shadow-2xl z-50 flex flex-col"
           style={{
             left: `${previewPosition.x}px`,
             top: `${previewPosition.y}px`,
-            width: `${previewSize.width}px`,
-            height: `${previewSize.height + 40}px`, // Add space for header
-            minWidth: '320px',
-            minHeight: '220px',
+            width: `${previewConstrained.width}px`,
+            height: `${previewConstrained.height + 40}px`,
+            minWidth: '280px',
+            minHeight: '200px',
+            maxWidth: '90vw',
+            maxHeight: '90vh',
           }}
         >
           {/* Header - Draggable */}
@@ -2114,6 +2280,18 @@ export default function OperatorsPage() {
               <span className="text-sm font-medium text-white">Preview</span>
             </div>
             <div className="flex items-center gap-2">
+              {selectedEventId && (
+                <button
+                  type="button"
+                  onClick={() => setPreviewRefreshKey((k) => k + 1)}
+                  className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-600 transition-colors"
+                  title="Refresh preview"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+              )}
               <span className="text-xs text-gray-400">Output:</span>
               {[1, 2, 3, 4].map((outputNum) => (
                 <button
@@ -2139,418 +2317,32 @@ export default function OperatorsPage() {
             </button>
           </div>
 
-          {/* Preview Content - True 16:9 aspect ratio with proper scaling */}
+          {/* Preview Content - iframe loads same output page; keeps 16:9 and scales with window */}
           <div
-            className="bg-black relative hide-scrollbar"
+            className="bg-black relative hide-scrollbar flex-1 min-h-0"
             style={{
-              width: `${previewSize.width}px`,
-              height: `${previewSize.height}px`,
+              width: '100%',
               aspectRatio: '16/9',
               overflow: 'hidden',
               position: 'relative',
             }}
           >
-            {activePoll ? (() => {
-              // Determine which layout to show based on output settings for preview output
-              const outputSettings = activePoll.outputSettings || {};
-              let layoutToShow = activePoll.layoutStyle || 1;
-              
-              // Override layout based on what's enabled for this output
-              // Priority: fullScreen > lowerThird > pip
-              if (outputSettings.fullScreen?.includes(previewOutput)) {
-                layoutToShow = 1;
-              } else if (outputSettings.lowerThird?.includes(previewOutput)) {
-                layoutToShow = 2;
-              } else if (outputSettings.pip?.includes(previewOutput)) {
-                layoutToShow = 3;
-              }
-              
-              // Create a modified poll object with the correct layout
-              const previewPoll = { ...activePoll, layoutStyle: layoutToShow };
-              
-              return layoutToShow === 1 ? (
-                /* Full Screen Layout */
-                <div className="relative w-full h-full hide-scrollbar" style={{ width: '960px', height: '540px', transform: `scale(${previewSize.width / 960})`, transformOrigin: 'top left', overflow: 'hidden' }}>
-                  {/* Background layer - animates first if enabled */}
-                  <div
-                    className={`absolute inset-0 transition-all duration-500 ${backgroundAnimateFirst && previewVisible ? 'opacity-100' : !backgroundAnimateFirst ? (previewVisible ? 'opacity-100' : 'opacity-0') : 'opacity-0'}`}
-                    style={{
-                      width: '960px',
-                      height: '540px',
-                      zIndex: 0,
-                      ...(() => {
-                        const bg = activePoll.backgroundSettings?.fullScreen;
-                        if (bg?.type === 'color' && bg.color) return { background: bg.color };
-                        if (bg?.type === 'image' && bg.imageUrl) return {
-                          backgroundImage: `url(${bg.imageUrl})`,
-                          backgroundSize: 'cover',
-                          backgroundPosition: 'center',
-                          backgroundRepeat: 'no-repeat',
-                        };
-                        return {};
-                      })(),
-                      ...(() => {
-                        const border = activePoll.borderSettings?.fullScreen;
-                        if (border?.thickness && border.thickness > 0) {
-                          const position = border.position || 'outer';
-                          const borderColor = activePoll.primaryColor || '#3B82F6';
-                          if (position === 'inner') {
-                            return { boxShadow: `inset 0 0 0 ${border.thickness}px ${borderColor}` };
-                          } else {
-                            return { boxShadow: `0 0 0 ${border.thickness}px ${borderColor}` };
-                          }
-                        }
-                        return {};
-                      })(),
-                      ...(activePoll.borderSettings?.fullScreen?.zoom && activePoll.borderSettings.fullScreen.zoom !== 100 ? {
-                        transform: `scale(${activePoll.borderSettings.fullScreen.zoom / 100})`,
-                        transformOrigin: 'center center',
-                      } : {}),
-                      ...(activePoll.borderRadius ? { borderRadius: `${activePoll.borderRadius}px` } : {}),
-                    }}
-                  />
-                  {/* Content layer: key forces remount when showing so keyframe animation runs on mount; out = transition */}
-                  <div
-                    key={`poll-full-${activePoll.id}-${previewVisible ? 'on' : 'off'}`}
-                    className={`absolute inset-0 flex items-center justify-center hide-scrollbar ${
-                      previewVisible ? getTransitionInClass(animationInType) : `transition-all duration-500 ${getAnimationClasses(false, animationInType)}`
-                    }`}
-                    style={{
-                      width: '960px',
-                      height: '540px',
-                      zIndex: 1,
-                      background: 'transparent',
-                      transitionDelay: backgroundAnimateFirst && previewVisible ? '300ms' : '0ms',
-                      ...(previewVisible ? {} : { opacity: 0 }),
-                    }}
-                  >
-                    <PollDisplay poll={previewPoll} disableBackground={true} />
-                  </div>
-                </div>
-              ) : layoutToShow === 2 ? (
-                /* Lower Third Layout - Fixed height (1/3 of screen) at bottom */
-                (() => {
-                  const baseHeight = 180; // 1/3 of 540px
-                  const borderSetting = activePoll.borderSettings?.lowerThird;
-                  const borderType = (borderSetting as any)?.type || borderSetting?.position || 'line';
-                  const hasBoxEdge = borderType === 'boxEdge' || borderType === 'boxInner' || borderType === 'inner';
-                  const zoomPercent = (hasBoxEdge && borderSetting?.zoom !== undefined) ? borderSetting.zoom : 100;
-                  const zoomScale = zoomPercent / 100;
-                  const shouldZoom = hasBoxEdge && zoomPercent !== 100;
-                  const yPosition = (hasBoxEdge && (borderSetting as any)?.yPosition !== undefined && (borderSetting as any)?.yPosition !== null) 
-                    ? (borderSetting as any).yPosition 
-                    : 0;
-                  
-                  const scaleFactor = previewSize.width / 960;
-                  const actualYPosition = yPosition || 0;
-                  const lineOffset = 25;
-                  const bottomAdjustment = shouldZoom 
-                    ? (baseHeight * (1 - zoomScale) / 2) - actualYPosition + lineOffset
-                    : -actualYPosition + lineOffset;
-                  
-                  return (
-                    <div
-                      className="relative w-full h-full hide-scrollbar"
-                      style={{
-                        width: '960px',
-                        height: '540px',
-                        transform: `scale(${scaleFactor})`,
-                        transformOrigin: 'top left',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        className="relative hide-scrollbar"
-                        style={{
-                          width: shouldZoom ? '960px' : '100%',
-                          height: `${baseHeight}px`,
-                          transform: shouldZoom ? `scale(${zoomScale})` : undefined,
-                          transformOrigin: shouldZoom ? 'center center' : undefined,
-                          overflow: 'hidden',
-                          position: 'absolute',
-                          left: shouldZoom ? '50%' : '0',
-                          right: shouldZoom ? undefined : '0',
-                          bottom: `${bottomAdjustment}px`,
-                          marginLeft: shouldZoom ? '-480px' : '0',
-                        }}
-                      >
-                        {/* Background layer */}
-                        <div
-                          className={`absolute inset-0 transition-all duration-500 ${backgroundAnimateFirst && previewVisible ? 'opacity-100' : !backgroundAnimateFirst ? (previewVisible ? 'opacity-100' : 'opacity-0') : 'opacity-0'}`}
-                          style={{
-                            width: '100%',
-                            height: `${baseHeight}px`,
-                            zIndex: 0,
-                            ...(Object.keys(activePoll.backgroundSettings?.lowerThird || {}).length > 0 && activePoll.backgroundSettings?.lowerThird?.type !== 'transparent' ? (
-                              activePoll.backgroundSettings?.lowerThird?.type === 'color' && activePoll.backgroundSettings?.lowerThird?.color
-                                ? { background: activePoll.backgroundSettings.lowerThird.color }
-                                : activePoll.backgroundSettings?.lowerThird?.type === 'image' && activePoll.backgroundSettings?.lowerThird?.imageUrl
-                                ? {
-                                    backgroundImage: `url(${activePoll.backgroundSettings.lowerThird.imageUrl})`,
-                                    backgroundSize: 'cover',
-                                    backgroundPosition: 'center',
-                                    backgroundRepeat: 'no-repeat',
-                                  }
-                                : {}
-                            ) : {
-                              background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 100%)',
-                            }),
-                            ...(() => {
-                              const border = activePoll.borderSettings?.lowerThird;
-                              if (border?.thickness && border.thickness > 0) {
-                                const position = border.position || 'outer';
-                                const borderColor = activePoll.primaryColor || '#3B82F6';
-                                if (position === 'inner') {
-                                  return { boxShadow: `inset 0 0 0 ${border.thickness}px ${borderColor}` };
-                                } else {
-                                  return { boxShadow: `0 0 0 ${border.thickness}px ${borderColor}` };
-                                }
-                              }
-                              return {};
-                            })(),
-                            backdropFilter: 'blur(8px)',
-                            borderTop: Object.keys(activePoll.borderSettings?.lowerThird || {}).length === 0 || !activePoll.borderSettings?.lowerThird?.thickness ? `3px solid ${activePoll.primaryColor || '#3B82F6'}` : undefined,
-                            ...(activePoll.borderRadius ? { borderRadius: `${activePoll.borderRadius}px` } : {}),
-                          }}
-                        />
-                        {/* Content layer */}
-                        <div
-                          key={`poll-lower-${activePoll.id}-${previewVisible ? 'on' : 'off'}`}
-                          className={`absolute inset-0 hide-scrollbar ${
-                            previewVisible ? getTransitionInClass(animationInType) : `transition-all duration-500 ${getAnimationClasses(false, animationInType)}`
-                          }`}
-                          style={{
-                            width: '100%',
-                            height: `${baseHeight}px`,
-                            zIndex: 1,
-                            background: 'transparent',
-                            transitionDelay: backgroundAnimateFirst && previewVisible ? '300ms' : '0ms',
-                            padding: '24px',
-                            ...(previewVisible ? {} : { opacity: 0 }),
-                          }}
-                        >
-                          <PollDisplay poll={previewPoll} disableBackground={true} />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()
-              ) : (
-                /* PIP Layout - Side box */
-                (() => {
-                  const pipBorderSetting = activePoll.borderSettings?.pip;
-                  const pipZoom = (pipBorderSetting as any)?.zoom !== undefined ? (pipBorderSetting as any).zoom : 100;
-                  const pipXPosition = (pipBorderSetting as any)?.xPosition !== undefined && (pipBorderSetting as any).xPosition !== null ? (pipBorderSetting as any).xPosition : 0;
-                  const pipYPosition = (pipBorderSetting as any)?.yPosition !== undefined && (pipBorderSetting as any).yPosition !== null ? (pipBorderSetting as any).yPosition : 0;
-                  
-                  const pipZoomScale = pipZoom / 100;
-                  const shouldPipZoom = pipZoom !== 100;
-                  const scaleFactor = previewSize.width / 960;
-                  
-                  const baseTop = 24;
-                  const baseLeft = activePoll.pipPosition === 'left' ? 24 : undefined;
-                  const baseRight = activePoll.pipPosition === 'right' ? 24 : undefined;
-                  
-                  const finalTop = baseTop + pipYPosition;
-                  const finalLeft = baseLeft !== undefined ? baseLeft + pipXPosition : baseLeft;
-                  const finalRight = baseRight !== undefined ? baseRight - pipXPosition : baseRight;
-                  
-                  const finalTransform = shouldPipZoom 
-                    ? `scale(${scaleFactor * pipZoomScale})`
-                    : `scale(${scaleFactor})`;
-                  
-                  return (
-                    <div
-                      className="relative w-full h-full hide-scrollbar"
-                      style={{
-                        width: '960px',
-                        height: '540px',
-                        transform: finalTransform,
-                        transformOrigin: activePoll.pipPosition === 'left' ? 'left top' : 'right top',
-                        overflow: 'hidden',
-                        position: 'absolute',
-                        top: `${finalTop}px`,
-                        ...(finalLeft !== undefined ? { left: `${finalLeft}px` } : { right: `${finalRight}px` }),
-                        maxWidth: '35vw',
-                      }}
-                    >
-                      {/* Background layer */}
-                      <div
-                        className={`absolute inset-0 transition-all duration-500 ${backgroundAnimateFirst && previewVisible ? 'opacity-100' : !backgroundAnimateFirst ? (previewVisible ? 'opacity-100' : 'opacity-0') : 'opacity-0'}`}
-                        style={{
-                          width: '960px',
-                          height: '540px',
-                          zIndex: 0,
-                          ...(Object.keys(activePoll.backgroundSettings?.pip || {}).length > 0 && activePoll.backgroundSettings?.pip?.type !== 'transparent' ? (
-                            activePoll.backgroundSettings?.pip?.type === 'color' && activePoll.backgroundSettings?.pip?.color
-                              ? { background: activePoll.backgroundSettings.pip.color }
-                              : activePoll.backgroundSettings?.pip?.type === 'image' && activePoll.backgroundSettings?.pip?.imageUrl
-                              ? {
-                                  backgroundImage: `url(${activePoll.backgroundSettings.pip.imageUrl})`,
-                                  backgroundSize: 'cover',
-                                  backgroundPosition: 'center',
-                                  backgroundRepeat: 'no-repeat',
-                                }
-                              : {}
-                          ) : {
-                            background: 'rgba(0,0,0,0.95)',
-                          }),
-                          ...(() => {
-                            const border = activePoll.borderSettings?.pip;
-                            if (border?.thickness && border.thickness > 0) {
-                              const position = border.position || 'outer';
-                              const borderColor = activePoll.primaryColor || '#3B82F6';
-                              if (position === 'inner') {
-                                return { boxShadow: `inset 0 0 0 ${border.thickness}px ${borderColor}` };
-                              } else {
-                                return { border: `${border.thickness}px solid ${borderColor}` };
-                              }
-                            }
-                            return {};
-                          })(),
-                          backdropFilter: 'blur(8px)',
-                          border: Object.keys(activePoll.borderSettings?.pip || {}).length === 0 || !activePoll.borderSettings?.pip?.thickness ? `2px solid ${activePoll.primaryColor || '#3B82F6'}` : undefined,
-                          ...(activePoll.borderRadius ? { borderRadius: `${activePoll.borderRadius}px` } : {}),
-                        }}
-                      />
-                      {/* Content layer */}
-                      <div
-                        key={`poll-pip-${activePoll.id}-${previewVisible ? 'on' : 'off'}`}
-                        className={`absolute inset-0 hide-scrollbar ${
-                          previewVisible
-                            ? getTransitionInClass(animationInType)
-                            : `transition-all duration-500 ${activePoll.pipPosition === 'left'
-                            ? getAnimationClasses(false, animationOutType === 'slideLeft' ? 'slideLeft' : animationOutType)
-                            : getAnimationClasses(false, animationOutType === 'slideRight' ? 'slideRight' : animationOutType)}`
-                        }`}
-                        style={{
-                          width: '960px',
-                          height: '540px',
-                          zIndex: 1,
-                          background: 'transparent',
-                          transitionDelay: backgroundAnimateFirst && previewVisible ? '300ms' : '0ms',
-                          padding: '16px',
-                          ...(previewVisible ? {} : { opacity: 0 }),
-                        }}
-                      >
-                        <PollDisplay poll={previewPoll} disableBackground={true} />
-                      </div>
-                    </div>
-                  );
-                })()
-              );
-            })() : activeQA ? (() => {
-              // Ensure activeQA has outputSettings from parent session if missing
-              let enrichedQA = activeQA;
-              if (!enrichedQA.outputSettings) {
-                const parentSession = qas.find(session => session.eventId === enrichedQA.eventId);
-                if (parentSession?.outputSettings) {
-                  enrichedQA = { ...enrichedQA, outputSettings: parentSession.outputSettings };
-                }
-              }
-              
-              // Determine which layout to show based on output settings for preview output
-              const outputSettings = enrichedQA.outputSettings || {};
-              let layoutToShow = enrichedQA.layoutStyle || 1;
-              
-              // Override layout based on what's enabled for this output
-              // Priority: fullScreen > lowerThird > splitScreen > pip
-              if (outputSettings.fullScreen?.includes(previewOutput)) {
-                layoutToShow = 1;
-              } else if (outputSettings.lowerThird?.includes(previewOutput)) {
-                layoutToShow = 2;
-              } else if (outputSettings.splitScreen?.includes(previewOutput)) {
-                layoutToShow = 4;
-              } else if (outputSettings.pip?.includes(previewOutput)) {
-                layoutToShow = 3;
-              }
-              
-              // Create a modified Q&A object with the correct layout
-              const previewQA = { ...enrichedQA, layoutStyle: layoutToShow };
-              
-              // Get background and border styles (simplified for preview)
-              const getQABackgroundStyle = () => {
-                let bgSetting;
-                if (layoutToShow === 1) {
-                  bgSetting = previewQA.backgroundSettings?.fullScreen;
-                } else if (layoutToShow === 2) {
-                  bgSetting = previewQA.backgroundSettings?.lowerThird;
-                } else if (layoutToShow === 3) {
-                  bgSetting = previewQA.backgroundSettings?.pip;
-                } else {
-                  bgSetting = previewQA.backgroundSettings?.splitScreen;
-                }
-                
-                if (!bgSetting || !bgSetting.type || bgSetting.type === 'transparent') {
-                  return layoutToShow === 2 
-                    ? { background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 100%)' }
-                    : { background: 'rgba(0,0,0,0.95)' };
-                } else if (bgSetting.type === 'color') {
-                  return { background: bgSetting.color || 'rgba(0,0,0,0.95)' };
-                } else if (bgSetting.type === 'image' && bgSetting.imageUrl) {
-                  return {
-                    backgroundImage: `url(${bgSetting.imageUrl})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    backgroundRepeat: 'no-repeat',
-                  };
-                }
-                return { background: 'rgba(0,0,0,0.95)' };
-              };
-              
-              // Render Q&A fullscreen with proper animation structure
-              const shouldShow = previewVisible && qaAnimatingIn;
-              
-              return (
-                <div 
-                  key={`qa-${activeQA.id}-${previewOutput}`}
-                  className="relative w-full h-full hide-scrollbar" 
-                  style={{ width: '960px', height: '540px', transform: `scale(${previewSize.width / 960})`, transformOrigin: 'top left', overflow: 'hidden' }}
-                >
-                  {/* Background layer - animates first if enabled */}
-                  <div
-                    className={`absolute inset-0 transition-all duration-500 ${
-                      backgroundAnimateFirst && shouldShow
-                        ? 'opacity-100'
-                        : !backgroundAnimateFirst
-                        ? (shouldShow ? 'opacity-100' : 'opacity-0')
-                        : 'opacity-0'
-                    }`}
-                    style={{
-                      width: '960px',
-                      height: '540px',
-                      zIndex: 0,
-                      ...getQABackgroundStyle(),
-                      backdropFilter: 'blur(8px)',
-                    }}
-                  />
-                  {/* Content layer: key forces remount when showing so keyframe animation runs on mount */}
-                  <div
-                    key={`qa-${activeQA.id}-${previewOutput}-${shouldShow ? 'on' : 'off'}`}
-                    className={`absolute inset-0 flex items-center justify-center hide-scrollbar ${
-                      shouldShow ? getTransitionInClass(animationInType) : `transition-all duration-500 ${getAnimationClasses(false, animationInType)}`
-                    }`}
-                    style={{
-                      width: '960px',
-                      height: '540px',
-                      zIndex: 1,
-                      background: 'transparent',
-                      transitionDelay: backgroundAnimateFirst && shouldShow ? '300ms' : '0ms',
-                      ...(shouldShow ? {} : { opacity: 0 }),
-                    }}
-                  >
-                    <QADisplay qa={previewQA} disableBackground={true} />
-                  </div>
-                </div>
-              );
-            })() : (
+            {selectedEventId ? (
+              <iframe
+                key={`preview-${selectedEventId}-${previewOutput}-${previewRefreshKey}`}
+                src={`/output/${selectedEventId}/${previewOutput}`}
+                title="Output preview"
+                className="w-full h-full border-0 bg-black"
+                style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+              />
+            ) : (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-gray-600 text-center">
                   <div className="text-6xl mb-4 opacity-50">
                     <VideoIcon />
                   </div>
-                  <p className="mt-4 text-xl">No active items</p>
-                  <p className="text-sm text-gray-500 mt-2">Click play to see preview</p>
+                  <p className="mt-4 text-xl">Select an event to see preview</p>
+                  <p className="text-sm text-gray-500 mt-2">Preview shows the same feed as Output</p>
                 </div>
               </div>
             )}

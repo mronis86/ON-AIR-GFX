@@ -4,7 +4,7 @@ import { getEvent, getPollsByEvent, getQAsByEvent, getQAsByStatus } from '../ser
 import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
-import { getAnimationSettings, getAnimationClasses, getTransitionInClass, afterDelayThenPaint } from '../utils/animations';
+import { getAnimationSettings, getAnimationClasses, getTransitionInClass, getAnimationOutStyle, afterDelayThenPaint } from '../utils/animations';
 import { QAStatus } from '../types';
 
 // Base dimensions for consistent scaling
@@ -188,17 +188,18 @@ export default function FullscreenOutputPage() {
         setPolls(pollsData);
         setQAs(qasData);
         
-        // For Q&A questions without outputSettings, copy from parent session
+        // For Q&A questions without outputSettings, copy from parent session or use default so active Q&A is always findable
+        const defaultOutputSettings = { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
         const qaSessions = qasData.filter(qa => qa.name && !qa.question);
         const qaQuestions = qasData.filter(qa => qa.question && !qa.name);
         const qaQuestionsWithSettings = qaQuestions.map(qa => {
-          if (!qa.outputSettings) {
-            const parentSession = qaSessions.find(session => session.eventId === qa.eventId);
-            if (parentSession?.outputSettings) {
-              return { ...qa, outputSettings: parentSession.outputSettings };
-            }
-          }
-          return qa;
+          const hasSettings = qa.outputSettings && Object.keys(qa.outputSettings).length > 0;
+          if (hasSettings) return qa;
+          const parentSession = qaSessions.find(session => session.eventId === qa.eventId);
+          const fromParent = parentSession?.outputSettings && Object.keys(parentSession.outputSettings).length > 0
+            ? parentSession.outputSettings
+            : null;
+          return { ...qa, outputSettings: fromParent || defaultOutputSettings };
         });
         const enrichedQasData = [...qaSessions, ...qaQuestionsWithSettings];
         
@@ -232,17 +233,18 @@ export default function FullscreenOutputPage() {
           getQAsByEvent(eventId),
         ]);
         
-        // For Q&A questions without outputSettings, copy from parent session
+        // For Q&A questions without outputSettings, copy from parent session or use default so active Q&A is always findable
+        const defaultOutputSettings = { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
         const qaSessions = qasData.filter(qa => qa.name && !qa.question);
         const qaQuestions = qasData.filter(qa => qa.question && !qa.name);
         const qaQuestionsWithSettings = qaQuestions.map(qa => {
-          if (!qa.outputSettings) {
-            const parentSession = qaSessions.find(session => session.eventId === qa.eventId);
-            if (parentSession?.outputSettings) {
-              return { ...qa, outputSettings: parentSession.outputSettings };
-            }
-          }
-          return qa;
+          const hasSettings = qa.outputSettings && Object.keys(qa.outputSettings).length > 0;
+          if (hasSettings) return qa;
+          const parentSession = qaSessions.find(session => session.eventId === qa.eventId);
+          const fromParent = parentSession?.outputSettings && Object.keys(parentSession.outputSettings).length > 0
+            ? parentSession.outputSettings
+            : null;
+          return { ...qa, outputSettings: fromParent || defaultOutputSettings };
         });
         const enrichedQasData = [...qaSessions, ...qaQuestionsWithSettings];
         
@@ -632,10 +634,10 @@ export default function FullscreenOutputPage() {
               } : {}),
             }}
           />
-          {/* Content layer: in = keyframe animation, out = transition (no key to avoid remount flicker) */}
+          {/* Content layer: in = keyframe, out = transition via inline style (avoids Tailwind purging dynamic classes) */}
           <div
             className={`absolute inset-0 flex items-center justify-center hide-scrollbar ${
-              isVisible ? getTransitionInClass(animationSettings.animationInType) : `transition-all duration-500 ${getAnimationClasses(false, animationSettings.animationInType)}`
+              isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'
             }`}
             style={{
               width: `${BASE_WIDTH}px`,
@@ -643,8 +645,8 @@ export default function FullscreenOutputPage() {
               zIndex: 1,
               background: 'transparent',
               transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-              ...(isVisible ? {} : { opacity: 0 }),
-              ...(() => {
+              ...(isVisible ? {} : getAnimationOutStyle(animationSettings.animationOutType)),
+              ...(isVisible ? (() => {
                 if (contentType === 'poll') {
                   const poll = activeContent as Poll;
                   const zoom = poll.borderSettings?.fullScreen?.zoom;
@@ -665,7 +667,7 @@ export default function FullscreenOutputPage() {
                   }
                 }
                 return {};
-              })(),
+              })() : {}),
             }}
           >
             {renderContent()}
@@ -760,10 +762,10 @@ export default function FullscreenOutputPage() {
                 } : {}),
             }}
           />
-          {/* Content layer: in = keyframe, out = transition */}
+          {/* Content layer: in = keyframe, out = transition via inline style */}
           <div
             className={`absolute inset-0 hide-scrollbar ${
-              isVisible ? getTransitionInClass(animationSettings.animationInType) : `transition-all duration-500 ${getAnimationClasses(false, animationSettings.animationInType)}`
+              isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'
             }`}
             style={{
               width: '100%',
@@ -772,7 +774,7 @@ export default function FullscreenOutputPage() {
               background: 'transparent',
               transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
               padding: (layoutBorderStyle as any)?.padding ? undefined : (shouldZoom ? '24px' : '24px'),
-              ...(isVisible ? {} : { opacity: 0 }),
+              ...(isVisible ? {} : getAnimationOutStyle(animationSettings.animationOutType)),
             }}
           >
             {renderContent()}
@@ -886,18 +888,14 @@ export default function FullscreenOutputPage() {
                 : {}),
             }}
           />
-          {/* Content layer: in = keyframe, out = transition */}
+          {/* Content layer: in = keyframe, out = transition via inline style */}
+          {(() => {
+            const pipSide = contentType === 'poll' ? (activeContent as Poll).pipPosition === 'left' : (activeContent as QandA).splitScreenPosition === 'left';
+            const pipOutType = pipSide ? (animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType) : (animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType);
+            return (
           <div
             className={`absolute inset-0 hide-scrollbar ${
-              isVisible
-                ? getTransitionInClass(animationSettings.animationInType)
-                : `transition-all duration-500 ${contentType === 'poll'
-                  ? (activeContent as Poll).pipPosition === 'left'
-                    ? getAnimationClasses(false, animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType)
-                    : getAnimationClasses(false, animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType)
-                  : (activeContent as QandA).splitScreenPosition === 'left'
-                    ? getAnimationClasses(false, animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType)
-                    : getAnimationClasses(false, animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType)}`
+              isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'
             }`}
             style={{
               width: `${BASE_WIDTH}px`,
@@ -906,11 +904,13 @@ export default function FullscreenOutputPage() {
               background: 'transparent',
               transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
               padding: contentType === 'poll' ? '16px' : '32px',
-              ...(isVisible ? {} : { opacity: 0 }),
+              ...(isVisible ? {} : getAnimationOutStyle(pipOutType)),
             }}
           >
             {renderContent()}
           </div>
+            );
+          })()}
         </div>
           );
         })()
@@ -971,14 +971,13 @@ export default function FullscreenOutputPage() {
               borderRadius: qa.borderRadius ? `${qa.borderRadius}px` : '0',
             }}
           />
-          {/* Content layer: in = keyframe, out = transition */}
+          {/* Content layer: in = keyframe, out = transition via inline style */}
+          {(() => {
+            const splitOutType = splitScreenSide === 'left' ? (animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType) : (animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType);
+            return (
           <div
             className={`absolute inset-0 hide-scrollbar ${
-              isVisible
-                ? getTransitionInClass(animationSettings.animationInType)
-                : `transition-all duration-500 ${splitScreenSide === 'left'
-                  ? getAnimationClasses(false, animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType)
-                  : getAnimationClasses(false, animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType)}`
+              isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'
             }`}
             style={{
               width: `${splitWidth}px`,
@@ -987,11 +986,13 @@ export default function FullscreenOutputPage() {
               background: 'transparent',
               transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
               padding: '32px',
-              ...(isVisible ? {} : { opacity: 0 }),
+              ...(isVisible ? {} : getAnimationOutStyle(splitOutType)),
             }}
           >
             {renderContent()}
           </div>
+            );
+          })()}
         </div>
           );
         })()

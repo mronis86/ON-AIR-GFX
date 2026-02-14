@@ -11,6 +11,8 @@ export interface Event {
   activeQASheetName?: string;
   /** Cell for active Q&A (e.g. "A1") — active question/answer update this cell */
   activeQACell?: string;
+  /** Base URL of Railway live-csv server (e.g. https://xxx.up.railway.app) for IMPORTDATA formula */
+  railwayLiveCsvBaseUrl?: string;
   publicLink?: string; // Public link for event submissions
   createdAt: string;
   updatedAt: string;
@@ -48,7 +50,8 @@ export interface Poll {
   type: PollType;
   title: string;
   options: PollOption[]; // Max 6 options
-  isActive: boolean;
+  isActive: boolean; // Shown on output (Play/Stop in Operators)
+  isActiveForPublic?: boolean; // Shown on public event page for voting (Active button in Operators)
   publicLink?: string; // Temporary public link for submissions
   displayType?: PollDisplayType; // How to display the poll
   primaryColor?: string; // Primary color (hex)
@@ -124,11 +127,13 @@ export enum QAStatus {
 export interface QandA {
   id: string;
   eventId: string;
+  sessionId?: string; // For questions: ID of the Q&A session this question belongs to
   name?: string; // Q&A session name/title (e.g., "Main Session Q&A", "Panel Discussion Q&A") - required for session containers
   question?: string; // The actual question - required for individual submissions/approved items
   answer?: string; // Optional - answer can be added later by moderator
   status: QAStatus; // pending, approved, rejected
-  isActive: boolean; // Currently showing on output
+  isActive: boolean; // Currently showing on output (Play/Stop in Operators)
+  isActiveForPublic?: boolean; // Session shown on public event page for submissions (Active button in Operators)
   isNext: boolean; // Next in queue to show
   isQueued?: boolean; // Queued for display
   isDone?: boolean; // Question has been displayed and is done

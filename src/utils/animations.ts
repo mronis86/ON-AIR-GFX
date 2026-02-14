@@ -1,4 +1,5 @@
 // Shared animation utilities for preview and output pages
+import type { CSSProperties } from 'react';
 
 export type AnimationType = 'fade' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'scale';
 
@@ -29,12 +30,34 @@ export const getTransitionInClass = (animationType: AnimationType): string => {
   return map[animationType] ?? 'transition-in-fade';
 };
 
+/** Inline style for animation OUT state. Use this so transform is not purged by Tailwind (dynamic classes).
+ *  For slide/scale we only set transform (no opacity) so the content stays visible while it moves off-screen;
+ *  otherwise opacity would fade first and the slide would be invisible. */
+export const getAnimationOutStyle = (animationType: AnimationType): CSSProperties => {
+  switch (animationType) {
+    case 'fade':
+      return { opacity: 0, pointerEvents: 'none' };
+    case 'slideUp':
+      return { transform: 'translateY(100%)', pointerEvents: 'none' };
+    case 'slideDown':
+      return { transform: 'translateY(-100%)', pointerEvents: 'none' };
+    case 'slideLeft':
+      return { transform: 'translateX(-100%)', pointerEvents: 'none' };
+    case 'slideRight':
+      return { transform: 'translateX(100%)', pointerEvents: 'none' };
+    case 'scale':
+      return { transform: 'scale(0.95)', pointerEvents: 'none' };
+    default:
+      return { opacity: 0, pointerEvents: 'none' };
+  }
+};
+
 export const getAnimationClasses = (
   isVisible: boolean,
   animationType: AnimationType
 ): string => {
   if (!isVisible) {
-    // Animation out
+    // Animation out (classes may be purged if only used dynamically; prefer getAnimationOutStyle for output)
     switch (animationType) {
       case 'fade':
         return 'opacity-0 pointer-events-none';

@@ -4,10 +4,9 @@
   "description": "Serves live Q&A as CSV for Google Sheets IMPORTDATA. Deploy to Railway (no Blaze).",
   "main": "server.js",
   "engines": { "node": ">=18" },
-  "scripts": {
-    "start": "node server.js"
-  },
+  "scripts": { "start": "node server.js" },
   "dependencies": {
-    "express": "^4.21.0"
+    "express": "^4.21.0",
+    "firebase-admin": "^12.0.0"
   }
 }

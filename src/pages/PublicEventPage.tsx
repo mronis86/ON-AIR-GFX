@@ -57,14 +57,15 @@ export default function PublicEventPage() {
 
         setEvent(eventData);
         
-        // Filter polls to only show active ones (public can vote on active polls)
-        const activePolls = pollsData.filter(poll => poll.isActive);
+        // Filter polls to only those with Public button ON in Operators
+        const activePolls = pollsData.filter((poll) => poll.isActiveForPublic === true);
         setPolls(activePolls);
         console.log('PublicEventPage: Set polls:', activePolls);
         
-        // Show all Q&A sessions (they automatically appear on public event page)
-        // Filter to only show Q&A session containers (ones with a name, not individual submissions)
-        const publicQAs = qasData.filter(qa => qa.name && !qa.question);
+        // Q&A sessions: only show those with Public button ON in Operators
+        const publicQAs = qasData.filter(
+          (qa) => qa.name && !qa.question && qa.isActiveForPublic === true
+        );
         setQAs(publicQAs);
         console.log('PublicEventPage: Set Q&As:', publicQAs);
 

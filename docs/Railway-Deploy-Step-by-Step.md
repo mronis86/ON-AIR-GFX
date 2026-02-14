@@ -50,10 +50,10 @@ The repo has both the main app and the `live-csv-server` folder. Railway must bu
 2. Click **Add variable** or **New variable**.
 3. Add these two:
 
-   | Variable name         | Value                                                                 |
-   |-----------------------|-----------------------------------------------------------------------|
-   | `FIREBASE_API_KEY`    | Your Firebase web API key (same as in your `.env`: `VITE_FIREBASE_API_KEY`) |
-   | `FIREBASE_PROJECT_ID` | Your Firebase project ID (e.g. `chamber-on-air-gfx`)                 |
+   | Variable name              | Value                                                                 |
+   |----------------------------|-----------------------------------------------------------------------|
+   | `FIREBASE_PROJECT_ID`      | Your Firebase project ID (e.g. `chamber-on-air-gfx`)                 |
+   | `FIREBASE_SERVICE_ACCOUNT` | Full JSON of your Firebase service account key (see Firebase Console → Project settings → Service accounts → Generate new private key). Paste the entire JSON as one line. |
 
 4. Save. Railway will redeploy so the server sees the new env vars.
 
@@ -113,7 +113,7 @@ If the app has a “Railway URL” or “Live CSV server URL” field in the eve
 - [ ] Code pushed to GitHub (including `live-csv-server`).
 - [ ] Railway: New project → Deploy from GitHub → select ON-AIR-GFX.
 - [ ] Root directory set to **`live-csv-server`**.
-- [ ] Variables: **FIREBASE_API_KEY**, **FIREBASE_PROJECT_ID**.
+- [ ] Variables: **FIREBASE_PROJECT_ID**, **FIREBASE_SERVICE_ACCOUNT**.
 - [ ] Domain generated and URL copied.
 - [ ] Test: open `https://YOUR_RAILWAY_URL/live-qa-csv?eventId=EVENT_ID` in browser.
 - [ ] In Sheets: `=IMPORTDATA("https://YOUR_RAILWAY_URL/live-qa-csv?eventId=EVENT_ID")`.
@@ -123,6 +123,6 @@ If the app has a “Railway URL” or “Live CSV server URL” field in the eve
 ## Troubleshooting
 
 - **Build fails:** Ensure Root Directory is exactly `live-csv-server` and that the folder has `package.json` and `server.js`.
-- **500 or “Set FIREBASE_API_KEY”:** Check both env vars in Railway → Variables.
+- **500 or “Set FIREBASE_API_KEY”:** Check FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT in Railway → Variables.
 - **Empty or wrong CSV:** Check that the event ID is correct and that the Operators app has written live state to Firestore for that event.
 - **Sheets doesn’t refresh:** IMPORTDATA refreshes on a schedule (e.g. hourly); you can’t force a refresh from the formula. For more frequent updates, use a trigger or the Apps Script approach.
