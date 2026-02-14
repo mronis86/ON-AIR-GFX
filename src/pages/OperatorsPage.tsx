@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAllEvents, getEvent, getPollsByEvent, getQAsByEvent, updatePoll, updateQA } from '../services/firestore';
+import { getAllEvents, getEvent, getPollsByEvent, getQAsByEvent, updatePoll, updateQA, setLiveState } from '../services/firestore';
 import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
 import { getAnimationClasses, getTransitionInClass, afterDelayThenPaint, saveAnimationSettings, getAnimationSettings } from '../utils/animations';
+import { postToWebApp } from '../services/googleSheets';
+import { buildLiveQaCsv, downloadCsv } from '../utils/liveDataCsv';
 
 const OPERATOR_PASSWORD = '1615';
 
@@ -248,17 +250,55 @@ export default function OperatorsPage() {
     }
   }, [qaQuestions, activeQA?.id, previewVisible, previewOutput, qas, activePoll, qaAnimateInDelayMs]);
 
-  // Event-level Google Sheet: push active poll (to its sub-sheet) and active Q&A (to cell) when they change
+  // Always write live state to Firestore (free plan: Google Apps Script can read from here and write to sheet)
+  useEffect(() => {
+    if (!selectedEventId || !selectedEvent) return;
+    setLiveState(selectedEventId, {
+      activePoll: activePoll
+        ? {
+            id: activePoll.id,
+            title: activePoll.title,
+            type: activePoll.type,
+            options: activePoll.options,
+            googleSheetTab: activePoll.googleSheetTab,
+          }
+        : null,
+      activeQA: activeQA
+        ? {
+            question: activeQA.question ?? '',
+            answer: activeQA.answer ?? '',
+            submitterName: activeQA.submitterName ?? '',
+          }
+        : null,
+      pollSheetName: activePoll?.googleSheetTab?.trim() || undefined,
+      qaSheetName: selectedEvent?.activeQASheetName?.trim() || undefined,
+      qaCell: selectedEvent?.activeQACell?.trim() || undefined,
+      eventName: selectedEvent?.name,
+    }).catch((err) => console.warn('Live state write failed:', err));
+  }, [
+    selectedEventId,
+    selectedEvent?.id,
+    selectedEvent?.name,
+    selectedEvent?.activeQASheetName,
+    selectedEvent?.activeQACell,
+    activePoll?.id,
+    activePoll?.title,
+    activePoll?.type,
+    activePoll?.options,
+    activePoll?.googleSheetTab,
+    activeQA?.id,
+    activeQA?.question,
+    activeQA?.answer,
+    activeQA?.submitterName,
+  ]);
+
+  // Optional: also POST to Web App when URL is set (works with Cloud Function proxy on Blaze plan)
   useEffect(() => {
     const webAppUrl = selectedEvent?.googleSheetWebAppUrl?.trim();
     if (!webAppUrl) return;
 
     const post = (body: object) =>
-      fetch(webAppUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }).catch((err) => console.warn('Google Sheet web app POST failed:', err));
+      postToWebApp(webAppUrl, body).catch((err) => console.warn('Google Sheet web app POST failed:', err));
 
     if (activePoll?.googleSheetTab?.trim()) {
       post({
@@ -274,7 +314,7 @@ export default function OperatorsPage() {
       });
     }
 
-    if (selectedEvent.activeQASheetName?.trim() && selectedEvent.activeQACell?.trim()) {
+    if (selectedEvent && selectedEvent.activeQASheetName?.trim() && selectedEvent.activeQACell?.trim()) {
       post({
         type: 'qa_active',
         sheetName: selectedEvent.activeQASheetName.trim(),
@@ -992,7 +1032,7 @@ export default function OperatorsPage() {
             </div>
             <h1 className="text-2xl font-bold">Broadcast Control Panel</h1>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-2 items-center justify-end">
             {selectedEventId && (
               <>
                 <button
@@ -1034,6 +1074,23 @@ export default function OperatorsPage() {
                 >
                   <VideoIcon />
                   Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const csv = buildLiveQaCsv({
+                      activeQA: activeQA ? { question: activeQA.question ?? '', answer: activeQA.answer ?? '', submitterName: activeQA.submitterName ?? '' } : null,
+                      eventName: selectedEvent?.name,
+                    });
+                    downloadCsv(`live-qa-${selectedEventId}.csv`, csv);
+                  }}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2"
+                  title="Download active live Q&A as CSV (Question, Answer, Submitter)"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Download CSV
                 </button>
               </>
             )}
