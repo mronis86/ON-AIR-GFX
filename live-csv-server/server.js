@@ -4,8 +4,10 @@
  * GET /live-poll-csv?eventId=xxx returns Poll as CSV (title, options, votes).
  * Reads from Firestore. Set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT (JSON string) in Railway env.
  * Version: 2025-02-poll (includes /live-poll-csv endpoint)
+ * Caches responses 15s to reduce Firestore reads and avoid quota exhaustion.
  */
 const SERVER_VERSION = '2025-02-poll';
+const CACHE_TTL_MS = 15000; // 15 seconds - reduces Firestore quota usage
 const express = require('express');
 const admin = require('firebase-admin');
 
@@ -31,6 +33,21 @@ function escapeCsv(s) {
   if (s == null) s = '';
   const t = String(s).replace(/"/g, '""');
   return /[,"\n\r]/.test(t) ? `"${t}"` : t;
+}
+
+// Simple in-memory cache to reduce Firestore reads (avoids RESOURCE_EXHAUSTED / quota exceeded)
+const cache = new Map();
+function getCached(key) {
+  const ent = cache.get(key);
+  if (!ent) return null;
+  if (Date.now() > ent.expires) {
+    cache.delete(key);
+    return null;
+  }
+  return ent.value;
+}
+function setCache(key, value) {
+  cache.set(key, { value, expires: Date.now() + CACHE_TTL_MS });
 }
 
 app.use((req, res, next) => {
@@ -74,6 +91,7 @@ app.get('/live-qa-csv', async (req, res) => {
     ].join(',');
     const rows = ['Question ACTIVE,Name ACTIVE,Question Cue,Name Cue,Question Next,Name Next', row];
     const csv = '\uFEFF' + rows.join('\r\n');
+    setCache(cacheKey, csv);
     res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
   } catch (err) {
     res.status(500).set('Content-Type', 'text/plain').send(err?.message || 'Error');
@@ -88,6 +106,12 @@ app.get('/live-poll-csv', async (req, res) => {
   const eventId = (req.query.eventId || req.query.eventid || '').toString().trim();
   if (!eventId) {
     res.status(400).set('Content-Type', 'text/plain').send('Missing eventId query parameter');
+    return;
+  }
+  const cacheKey = `poll:${eventId}`;
+  const cached = getCached(cacheKey);
+  if (cached) {
+    res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(cached);
     return;
   }
   try {
@@ -129,6 +153,7 @@ app.get('/live-poll-csv', async (req, res) => {
     });
     const rows = [title, 'Option,Votes,Percentage,PercentRounded', ...optRows];
     const csv = '\uFEFF' + rows.join('\r\n');
+    setCache(cacheKey, csv);
     res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
   } catch (err) {
     res.status(500).set('Content-Type', 'text/plain').send(err?.message || 'Error');
