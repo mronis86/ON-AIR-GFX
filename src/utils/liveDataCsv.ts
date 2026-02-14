@@ -89,16 +89,20 @@ export function buildLiveDataCsv(data: {
 }
 
 /**
- * Build a CSV for a single poll (title, options, votes) for download.
+ * Build a CSV for a single poll (title, options, votes, percentage) for download.
  */
 export function buildPollCsv(poll: {
   title: string;
   options?: Array<{ text: string; votes?: number }>;
 }): string {
   const rows: string[] = [escapeCsv(poll.title)];
-  rows.push('Option,Votes');
-  (poll.options ?? []).forEach((opt) => {
-    rows.push([escapeCsv(opt.text), opt.votes ?? 0].join(','));
+  rows.push('Option,Votes,Percentage');
+  const opts = poll.options ?? [];
+  const totalVotes = opts.reduce((sum, o) => sum + (o.votes ?? 0), 0);
+  opts.forEach((opt) => {
+    const v = opt.votes ?? 0;
+    const pct = totalVotes > 0 ? ((v / totalVotes) * 100).toFixed(1) : '0';
+    rows.push([escapeCsv(opt.text), v, pct].join(','));
   });
   return '\uFEFF' + rows.join('\r\n'); // BOM for Excel
 }

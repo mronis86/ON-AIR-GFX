@@ -79,6 +79,7 @@ export default function OperatorsPage() {
   const [expandedPollId, setExpandedPollId] = useState<string | null>(null);
   const [csvSourceSessionId, setCsvSourceSessionId] = useState<string | null>(null);
   const [csvSourcePollId, setCsvSourcePollId] = useState<string | null>(null);
+  const [operatorRailwayBaseUrl, setOperatorRailwayBaseUrl] = useState('');
   const [expandedQAId, setExpandedQAId] = useState<string | null>(null);
   const [previewOutput, setPreviewOutput] = useState<number>(1); // Output 1-4 for preview
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0); // Increment to force iframe reload
@@ -530,6 +531,7 @@ export default function OperatorsPage() {
     sessionStorage.removeItem('operator_authenticated');
     setSelectedEventId(null);
     setSelectedEvent(null);
+    setOperatorRailwayBaseUrl('');
     setPolls([]);
     window.location.href = '/';
   };
@@ -547,6 +549,7 @@ export default function OperatorsPage() {
       
       setSelectedEventId(eventId);
       setSelectedEvent(event);
+      setOperatorRailwayBaseUrl(event?.railwayLiveCsvBaseUrl?.trim() ?? '');
       setPolls(eventPolls);
       setQAs(qaSessions);
       setQAQuestions(qaSubmissions);
@@ -1727,40 +1730,73 @@ export default function OperatorsPage() {
                             Copy
                           </button>
                         </div>
-                        {selectedEvent?.railwayLiveCsvBaseUrl?.trim() && (
-                          <div className="flex flex-wrap items-center gap-3 text-sm">
-                            <span className="text-gray-500 font-medium">Railway CSV:</span>
-                            <div className="flex flex-wrap items-center gap-2">
+                        <div className="space-y-2 text-sm">
+                          <label className="block text-gray-500 font-medium">Railway CSV server URL</label>
+                          <input
+                            type="text"
+                            value={operatorRailwayBaseUrl}
+                            onChange={(e) => setOperatorRailwayBaseUrl(e.target.value)}
+                            placeholder="https://your-app.up.railway.app"
+                            className="w-full max-w-md px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-200 placeholder-gray-500 text-sm"
+                          />
+                          <p className="text-xs text-gray-500">Paste your Railway URL above, then copy the links below. Save URL in Event page → Google Sheet to persist.</p>
+                          {operatorRailwayBaseUrl.trim() && (
+                            <div className="flex flex-wrap gap-2 pt-2">
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const url = `${selectedEvent.railwayLiveCsvBaseUrl!.replace(/\/+$/, '')}/live-qa-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
-                                  const formula = `=IMPORTDATA("${url}")`;
+                                  const base = operatorRailwayBaseUrl.trim().replace(/\/+$/, '');
+                                  const url = `${base}/live-qa-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
                                   try {
-                                    await navigator.clipboard.writeText(formula);
+                                    await navigator.clipboard.writeText(url);
                                   } catch (_) {}
                                 }}
                                 className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-xs text-white"
+                              >
+                                Copy Q&A CSV URL
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const base = operatorRailwayBaseUrl.trim().replace(/\/+$/, '');
+                                  const url = `${base}/live-qa-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
+                                  try {
+                                    await navigator.clipboard.writeText(`=IMPORTDATA("${url}")`);
+                                  } catch (_) {}
+                                }}
+                                className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 rounded text-xs text-white border border-cyan-500"
                               >
                                 Copy Q&A formula
                               </button>
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const url = `${selectedEvent.railwayLiveCsvBaseUrl!.replace(/\/+$/, '')}/live-poll-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
-                                  const formula = `=IMPORTDATA("${url}")`;
+                                  const base = operatorRailwayBaseUrl.trim().replace(/\/+$/, '');
+                                  const url = `${base}/live-poll-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
                                   try {
-                                    await navigator.clipboard.writeText(formula);
+                                    await navigator.clipboard.writeText(url);
                                   } catch (_) {}
                                 }}
                                 className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-xs text-white"
                               >
+                                Copy Poll CSV URL
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const base = operatorRailwayBaseUrl.trim().replace(/\/+$/, '');
+                                  const url = `${base}/live-poll-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
+                                  try {
+                                    await navigator.clipboard.writeText(`=IMPORTDATA("${url}")`);
+                                  } catch (_) {}
+                                }}
+                                className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 rounded text-xs text-white border border-cyan-500"
+                              >
                                 Copy Poll formula
                               </button>
                             </div>
-                            <span className="text-gray-500 text-xs">Configure Railway URL in Event page → Google Sheet</span>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
                     )}
 
