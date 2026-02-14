@@ -5,10 +5,12 @@ import {
   getDoc,
   addDoc,
   updateDoc,
+  setDoc,
   deleteDoc,
   query,
   where,
   deleteField,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type { Event, Poll, QandA } from '../types';
@@ -18,6 +20,29 @@ import { QAStatus } from '../types';
 export const eventsCollection = 'events';
 export const pollsCollection = 'polls';
 export const qaCollection = 'qa';
+export const liveStateCollection = 'liveState';
+
+/** Live state for an event: written by Operators page, read by Google Apps Script or CSV export. */
+export interface LiveStateData {
+  activePoll: { id: string; title: string; type: string; options: Array<{ text: string; votes?: number }>; googleSheetTab?: string } | null;
+  activeQA: { question: string; answer?: string; submitterName?: string } | null;
+  pollSheetName?: string;
+  qaSheetName?: string;
+  qaCell?: string;
+  eventName?: string;
+  updatedAt: unknown;
+}
+
+export const setLiveState = async (eventId: string, data: Omit<LiveStateData, 'updatedAt'>): Promise<void> => {
+  const ref = doc(db, liveStateCollection, eventId);
+  await setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true });
+};
+
+export const getLiveState = async (eventId: string): Promise<LiveStateData | null> => {
+  const ref = doc(db, liveStateCollection, eventId);
+  const snap = await getDoc(ref);
+  return snap.exists() ? (snap.data() as LiveStateData) : null;
+};
 
 // Event Operations
 export const createEvent = async (eventData: Omit<Event, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {

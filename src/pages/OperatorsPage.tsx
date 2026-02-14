@@ -274,7 +274,7 @@ export default function OperatorsPage() {
       qaSheetName: selectedEvent?.activeQASheetName?.trim() || undefined,
       qaCell: selectedEvent?.activeQACell?.trim() || undefined,
       eventName: selectedEvent?.name,
-    }).catch((err) => console.warn('Live state write failed:', err));
+    }).catch((err: unknown) => console.warn('Live state write failed:', err));
   }, [
     selectedEventId,
     selectedEvent?.id,
@@ -298,7 +298,7 @@ export default function OperatorsPage() {
     if (!webAppUrl) return;
 
     const post = (body: object) =>
-      postToWebApp(webAppUrl, body).catch((err) => console.warn('Google Sheet web app POST failed:', err));
+      postToWebApp(webAppUrl, body).catch((err: unknown) => console.warn('Google Sheet web app POST failed:', err));
 
     if (activePoll?.googleSheetTab?.trim()) {
       post({
