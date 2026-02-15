@@ -89,7 +89,7 @@ export default function PublicQAPage() {
         const eventData = await getEvent(qa.eventId);
         const qaBackupEnabled =
           eventData?.googleSheetWebAppUrl?.trim() &&
-          (eventData?.qaBackupSheetName?.trim() || (eventData?.qaBackupPerSession && eventData?.qaBackupSheetPrefix?.trim()));
+          (eventData?.qaBackupSheetName?.trim() || (eventData?.qaBackupSheetNames && Object.keys(eventData.qaBackupSheetNames).some((k) => eventData!.qaBackupSheetNames![k]?.trim())));
         if (qaBackupEnabled && eventData?.googleSheetWebAppUrl) {
           const ev = eventData;
           const webAppUrl = ev.googleSheetWebAppUrl!.trim();

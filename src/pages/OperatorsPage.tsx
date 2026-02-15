@@ -371,7 +371,7 @@ export default function OperatorsPage() {
 
     const pollBackupEnabled =
       selectedEvent?.pollBackupSheetName?.trim() ||
-      (selectedEvent?.pollBackupPerPoll && selectedEvent?.pollBackupSheetPrefix?.trim());
+      (selectedEvent?.pollBackupSheetNames && Object.keys(selectedEvent.pollBackupSheetNames).some((k) => (selectedEvent.pollBackupSheetNames as Record<string, string>)[k]?.trim()));
     if (activePoll && selectedEvent && pollBackupEnabled) {
       post({
         type: 'poll_backup',
@@ -405,8 +405,7 @@ export default function OperatorsPage() {
     selectedEvent?.activeQASheetName,
     selectedEvent?.activeQACell,
     selectedEvent?.pollBackupSheetName,
-    selectedEvent?.pollBackupPerPoll,
-    selectedEvent?.pollBackupSheetPrefix,
+    selectedEvent?.pollBackupSheetNames,
     activePoll?.id,
     activePoll?.title,
     activePoll?.googleSheetTab,

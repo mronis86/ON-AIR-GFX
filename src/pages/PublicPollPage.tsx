@@ -71,7 +71,7 @@ export default function PublicPollPage() {
         const [updatedPoll, eventData] = await Promise.all([getPoll(pollId!), getEvent(poll.eventId)]);
         const pollBackupEnabled =
           eventData?.googleSheetWebAppUrl?.trim() &&
-          (eventData?.pollBackupSheetName?.trim() || (eventData?.pollBackupPerPoll && eventData?.pollBackupSheetPrefix?.trim()));
+          (eventData?.pollBackupSheetName?.trim() || (eventData?.pollBackupSheetNames && Object.keys(eventData.pollBackupSheetNames).some((k) => eventData!.pollBackupSheetNames![k]?.trim())));
         if (updatedPoll && pollBackupEnabled && eventData?.googleSheetWebAppUrl) {
           const ev = eventData;
           const webAppUrl = ev.googleSheetWebAppUrl!.trim();

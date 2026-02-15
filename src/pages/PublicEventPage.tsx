@@ -127,7 +127,7 @@ export default function PublicEventPage() {
       // Backup poll to sheet on user vote (in advance of operators)
       const pollBackupEnabled =
         event?.googleSheetWebAppUrl?.trim() &&
-        (event?.pollBackupSheetName?.trim() || (event?.pollBackupPerPoll && event?.pollBackupSheetPrefix?.trim()));
+        (event?.pollBackupSheetName?.trim() || (event?.pollBackupSheetNames && Object.keys(event.pollBackupSheetNames).some((k) => event!.pollBackupSheetNames![k]?.trim())));
       if (pollBackupEnabled) {
         const updatedPoll = await getPoll(pollId);
         if (updatedPoll) {
@@ -222,7 +222,7 @@ export default function PublicEventPage() {
       setSubmittedQAs(prev => new Set([...prev, qaId]));
       const qaBackupEnabled =
         event?.googleSheetWebAppUrl?.trim() &&
-        (event?.qaBackupSheetName?.trim() || (event?.qaBackupPerSession && event?.qaBackupSheetPrefix?.trim()));
+        (event?.qaBackupSheetName?.trim() || (event?.qaBackupSheetNames && Object.keys(event.qaBackupSheetNames).some((k) => event!.qaBackupSheetNames![k]?.trim())));
       if (qaBackupEnabled && event?.googleSheetWebAppUrl) {
         const ev = event;
         const webAppUrl = ev.googleSheetWebAppUrl!.trim();

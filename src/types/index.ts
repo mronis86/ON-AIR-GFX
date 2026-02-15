@@ -11,18 +11,14 @@ export interface Event {
   activeQASheetName?: string;
   /** Cell for active Q&A (e.g. "A1") — active question/answer update this cell */
   activeQACell?: string;
-  /** Optional: sub-sheet to append all Q&A submissions (backup). One row per submission. */
+  /** Optional: sub-sheet to append all Q&A submissions (backup). Default when no per-session override. */
   qaBackupSheetName?: string;
-  /** If true, use one sub-sheet per Q&A session (sheet name = qaBackupSheetPrefix + "_" + sessionId). */
-  qaBackupPerSession?: boolean;
-  /** Prefix for per-session Q&A backup sheets (e.g. "QA" → QA_abc123). Used when qaBackupPerSession is true. */
-  qaBackupSheetPrefix?: string;
-  /** Optional: sub-sheet to append poll snapshots (backup). One row per snapshot. */
+  /** Per Q&A session sheet name overrides (sessionId → sheet name). Set via "Configure per session" popup. */
+  qaBackupSheetNames?: Record<string, string>;
+  /** Optional: sub-sheet to append poll snapshots (backup). Default when no per-poll override. */
   pollBackupSheetName?: string;
-  /** If true, use one sub-sheet per poll (sheet name = pollBackupSheetPrefix + "_" + pollId). */
-  pollBackupPerPoll?: boolean;
-  /** Prefix for per-poll backup sheets (e.g. "Poll" → Poll_xyz789). Used when pollBackupPerPoll is true. */
-  pollBackupSheetPrefix?: string;
+  /** Per-poll sheet name overrides (pollId → sheet name). Set via "Configure per poll" popup. */
+  pollBackupSheetNames?: Record<string, string>;
   /** Base URL of Railway live-csv server (e.g. https://xxx.up.railway.app) for IMPORTDATA formula */
   railwayLiveCsvBaseUrl?: string;
   publicLink?: string; // Public link for event submissions

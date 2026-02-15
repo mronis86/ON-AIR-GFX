@@ -79,30 +79,26 @@ function sanitizeSheetName(name: string): string {
 }
 
 /**
- * Resolve Q&A backup sheet name: one sheet for event or one per session.
+ * Resolve Q&A backup sheet name: per-session override, or default single sheet.
  */
 export function getQaBackupSheetName(
-  event: { qaBackupSheetName?: string; qaBackupPerSession?: boolean; qaBackupSheetPrefix?: string },
+  event: { qaBackupSheetName?: string; qaBackupSheetNames?: Record<string, string> },
   sessionId: string
 ): string {
-  if (event.qaBackupPerSession && (event.qaBackupSheetPrefix ?? 'QA').trim()) {
-    const prefix = (event.qaBackupSheetPrefix || 'QA').trim();
-    return sanitizeSheetName(prefix + '_' + sessionId);
-  }
+  const override = event.qaBackupSheetNames?.[sessionId]?.trim();
+  if (override) return sanitizeSheetName(override);
   return (event.qaBackupSheetName || '').trim() || 'QA_Submissions';
 }
 
 /**
- * Resolve poll backup sheet name: one sheet for event or one per poll.
+ * Resolve poll backup sheet name: per-poll override, or default single sheet.
  */
 export function getPollBackupSheetName(
-  event: { pollBackupSheetName?: string; pollBackupPerPoll?: boolean; pollBackupSheetPrefix?: string },
+  event: { pollBackupSheetName?: string; pollBackupSheetNames?: Record<string, string> },
   pollId: string
 ): string {
-  if (event.pollBackupPerPoll && (event.pollBackupSheetPrefix ?? 'Poll').trim()) {
-    const prefix = (event.pollBackupSheetPrefix || 'Poll').trim();
-    return sanitizeSheetName(prefix + '_' + pollId);
-  }
+  const override = event.pollBackupSheetNames?.[pollId]?.trim();
+  if (override) return sanitizeSheetName(override);
   return (event.pollBackupSheetName || '').trim() || 'Poll_Results';
 }
 

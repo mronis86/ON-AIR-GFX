@@ -40,17 +40,17 @@ export default function EventDetailPage() {
   const [activeQASheetName, setActiveQASheetName] = useState('');
   const [activeQACell, setActiveQACell] = useState('');
   const [qaBackupSheetName, setQaBackupSheetName] = useState('');
-  const [qaBackupPerSession, setQaBackupPerSession] = useState(false);
-  const [qaBackupSheetPrefix, setQaBackupSheetPrefix] = useState('');
+  const [qaBackupSheetNames, setQaBackupSheetNames] = useState<Record<string, string>>({});
   const [pollBackupSheetName, setPollBackupSheetName] = useState('');
-  const [pollBackupPerPoll, setPollBackupPerPoll] = useState(false);
-  const [pollBackupSheetPrefix, setPollBackupSheetPrefix] = useState('');
+  const [pollBackupSheetNames, setPollBackupSheetNames] = useState<Record<string, string>>({});
+  const [showQaBackupSheetModal, setShowQaBackupSheetModal] = useState(false);
+  const [showPollBackupSheetModal, setShowPollBackupSheetModal] = useState(false);
   const [savingSheet, setSavingSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savingPollTab, setSavingPollTab] = useState<string | null>(null);
   const [scriptCopied, setScriptCopied] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<'script' | 'error' | 'eventId' | null>(null);
-  const [scriptVariant, setScriptVariant] = useState<'webapp' | 'firestore' | 'firestore_simple' | 'railway'>('railway');
+  const [scriptVariant, setScriptVariant] = useState<'firestore' | 'firestore_simple'>('firestore_simple');
   const [railwayBaseUrl, setRailwayBaseUrl] = useState('');
   const railwayBaseUrlClean = railwayBaseUrl.trim().replace(/\/+$/, '');
   const railwayLiveQaCsvUrl = eventId && railwayBaseUrlClean ? `${railwayBaseUrlClean}/live-qa-csv?eventId=${encodeURIComponent(eventId)}` : '';
@@ -88,11 +88,9 @@ export default function EventDetailPage() {
         setActiveQASheetName(eventData.activeQASheetName || '');
         setActiveQACell(eventData.activeQACell || '');
         setQaBackupSheetName(eventData.qaBackupSheetName || '');
-        setQaBackupPerSession(!!eventData.qaBackupPerSession);
-        setQaBackupSheetPrefix(eventData.qaBackupSheetPrefix || '');
+        setQaBackupSheetNames(eventData.qaBackupSheetNames || {});
         setPollBackupSheetName(eventData.pollBackupSheetName || '');
-        setPollBackupPerPoll(!!eventData.pollBackupPerPoll);
-        setPollBackupSheetPrefix(eventData.pollBackupSheetPrefix || '');
+        setPollBackupSheetNames(eventData.pollBackupSheetNames || {});
         setRailwayBaseUrl(eventData.railwayLiveCsvBaseUrl || '');
         setError(null);
       } catch (err) {
@@ -131,11 +129,9 @@ export default function EventDetailPage() {
         activeQASheetName: activeQASheetName.trim() || '',
         activeQACell: activeQACell.trim() || '',
         qaBackupSheetName: qaBackupSheetName.trim() || undefined,
-        qaBackupPerSession: qaBackupPerSession,
-        qaBackupSheetPrefix: qaBackupSheetPrefix.trim() || undefined,
+        qaBackupSheetNames: Object.keys(qaBackupSheetNames).length ? qaBackupSheetNames : undefined,
         pollBackupSheetName: pollBackupSheetName.trim() || undefined,
-        pollBackupPerPoll: pollBackupPerPoll,
-        pollBackupSheetPrefix: pollBackupSheetPrefix.trim() || undefined,
+        pollBackupSheetNames: Object.keys(pollBackupSheetNames).length ? pollBackupSheetNames : undefined,
         railwayLiveCsvBaseUrl: railwayBaseUrl.trim().replace(/\/+$/, '') || undefined,
       });
 
@@ -446,11 +442,9 @@ export default function EventDetailPage() {
                       setActiveQASheetName(event.activeQASheetName || '');
                       setActiveQACell(event.activeQACell || '');
                       setQaBackupSheetName(event.qaBackupSheetName || '');
-                      setQaBackupPerSession(!!event.qaBackupPerSession);
-                      setQaBackupSheetPrefix(event.qaBackupSheetPrefix || '');
+                      setQaBackupSheetNames(event.qaBackupSheetNames || {});
                       setPollBackupSheetName(event.pollBackupSheetName || '');
-                      setPollBackupPerPoll(!!event.pollBackupPerPoll);
-                      setPollBackupSheetPrefix(event.pollBackupSheetPrefix || '');
+                      setPollBackupSheetNames(event.pollBackupSheetNames || {});
                       setRailwayBaseUrl(event.railwayLiveCsvBaseUrl || '');
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
@@ -506,93 +500,149 @@ export default function EventDetailPage() {
                   <div className="mt-4">
                     <p className="text-sm font-medium text-gray-700 mb-2">Backup sheets (optional)</p>
                     <p className="text-xs text-gray-500 mb-2">
-                      Writing uses the <strong>Web App</strong> script (deploy in the sheet: Extensions → Apps Script). If backup doesn’t appear, set the <strong>Railway URL</strong> below (same as for live CSV) — the app will send writes through Railway to avoid CORS.
+                      Writing uses the <strong>Web App</strong> script only (see below). Set the <strong>Railway URL</strong> in the Reading section so the app can send writes through Railway. No script runs on Railway — it just forwards requests to the Web App.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
+                      <div>
+                        <label htmlFor="qa-backup-sheet" className="block text-sm font-medium text-gray-700 mb-1">Q&A backup sheet (default)</label>
+                        <div className="flex gap-2">
                           <input
-                            id="qa-backup-per-session"
-                            type="checkbox"
-                            checked={qaBackupPerSession}
-                            onChange={(e) => setQaBackupPerSession(e.target.checked)}
-                            className="rounded border-gray-300"
+                            id="qa-backup-sheet"
+                            type="text"
+                            value={qaBackupSheetName}
+                            onChange={(e) => setQaBackupSheetName(e.target.value)}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="e.g. QA_Submissions"
                           />
-                          <label htmlFor="qa-backup-per-session" className="text-sm font-medium text-gray-700">One sheet per Q&A session</label>
+                          <button
+                            type="button"
+                            onClick={() => setShowQaBackupSheetModal(true)}
+                            className="shrink-0 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                          >
+                            Per session…
+                          </button>
                         </div>
-                        {qaBackupPerSession ? (
-                          <div>
-                            <label htmlFor="qa-backup-prefix" className="block text-xs font-medium text-gray-600 mb-0.5">Prefix (e.g. QA → sheets QA_abc123, QA_def456)</label>
-                            <input
-                              id="qa-backup-prefix"
-                              type="text"
-                              value={qaBackupSheetPrefix}
-                              onChange={(e) => setQaBackupSheetPrefix(e.target.value)}
-                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
-                              placeholder="QA"
-                            />
-                          </div>
-                        ) : (
-                          <>
-                            <label htmlFor="qa-backup-sheet" className="block text-sm font-medium text-gray-700 mb-1">Q&A backup sheet name</label>
-                            <input
-                              id="qa-backup-sheet"
-                              type="text"
-                              value={qaBackupSheetName}
-                              onChange={(e) => setQaBackupSheetName(e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="e.g. QA_Submissions"
-                            />
-                          </>
-                        )}
-                        <p className="mt-0.5 text-xs text-gray-500">Trigger: when someone submits a question. Columns: Timestamp, Session ID, Question, Submitter, Email, Status.</p>
+                        <p className="mt-0.5 text-xs text-gray-500">Or set a sheet name per Q&A session in the popup. Trigger: when someone submits a question.</p>
                       </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
+                      <div>
+                        <label htmlFor="poll-backup-sheet" className="block text-sm font-medium text-gray-700 mb-1">Poll backup sheet (default)</label>
+                        <div className="flex gap-2">
                           <input
-                            id="poll-backup-per-poll"
-                            type="checkbox"
-                            checked={pollBackupPerPoll}
-                            onChange={(e) => setPollBackupPerPoll(e.target.checked)}
-                            className="rounded border-gray-300"
+                            id="poll-backup-sheet"
+                            type="text"
+                            value={pollBackupSheetName}
+                            onChange={(e) => setPollBackupSheetName(e.target.value)}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="e.g. Poll_Results"
                           />
-                          <label htmlFor="poll-backup-per-poll" className="text-sm font-medium text-gray-700">One sheet per poll</label>
+                          <button
+                            type="button"
+                            onClick={() => setShowPollBackupSheetModal(true)}
+                            className="shrink-0 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                          >
+                            Per poll…
+                          </button>
                         </div>
-                        {pollBackupPerPoll ? (
-                          <div>
-                            <label htmlFor="poll-backup-prefix" className="block text-xs font-medium text-gray-600 mb-0.5">Prefix (e.g. Poll → sheets Poll_xyz, Poll_abc)</label>
-                            <input
-                              id="poll-backup-prefix"
-                              type="text"
-                              value={pollBackupSheetPrefix}
-                              onChange={(e) => setPollBackupSheetPrefix(e.target.value)}
-                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
-                              placeholder="Poll"
-                            />
-                          </div>
-                        ) : (
-                          <>
-                            <label htmlFor="poll-backup-sheet" className="block text-sm font-medium text-gray-700 mb-1">Poll backup sheet name</label>
-                            <input
-                              id="poll-backup-sheet"
-                              type="text"
-                              value={pollBackupSheetName}
-                              onChange={(e) => setPollBackupSheetName(e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="e.g. Poll_Results"
-                            />
-                          </>
-                        )}
-                        <p className="mt-0.5 text-xs text-gray-500">Trigger: when someone votes (public) or Operators sync the active poll. Columns: Timestamp, Poll ID, Title, Option/Votes.</p>
+                        <p className="mt-0.5 text-xs text-gray-500">Or set a sheet name per poll in the popup. Trigger: when someone votes or Operators sync.</p>
                       </div>
                     </div>
                   </div>
+
+                  {/* Modal: Set sheet name per Q&A session */}
+                  {showQaBackupSheetModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowQaBackupSheetModal(false)}>
+                      <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-4 border-b border-gray-200">
+                          <h3 className="text-sm font-semibold text-gray-800">Sheet name per Q&A session</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Leave blank to use the default sheet above. Save here, then Save the main form.</p>
+                        </div>
+                        <div className="p-4 overflow-y-auto flex-1 space-y-3">
+                          {qas.length === 0 ? (
+                            <p className="text-sm text-gray-500">No Q&A sessions yet. Create one in the Q&A tab first.</p>
+                          ) : (
+                            qas.map((qa) => (
+                              <div key={qa.id} className="flex flex-col gap-1">
+                                <label className="text-xs font-medium text-gray-600">{qa.name || qa.id}</label>
+                                <input
+                                  type="text"
+                                  value={qaBackupSheetNames[qa.id] ?? ''}
+                                  onChange={(e) => setQaBackupSheetNames((prev) => ({ ...prev, [qa.id]: e.target.value }))}
+                                  placeholder={qaBackupSheetName || 'QA_Submissions'}
+                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                                />
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div className="p-4 border-t border-gray-200 flex justify-end gap-2">
+                          <button type="button" onClick={() => setShowQaBackupSheetModal(false)} className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">Done</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Modal: Set sheet name per poll */}
+                  {showPollBackupSheetModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowPollBackupSheetModal(false)}>
+                      <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-4 border-b border-gray-200">
+                          <h3 className="text-sm font-semibold text-gray-800">Sheet name per poll</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Leave blank to use the default sheet above. Save here, then Save the main form.</p>
+                        </div>
+                        <div className="p-4 overflow-y-auto flex-1 space-y-3">
+                          {polls.length === 0 ? (
+                            <p className="text-sm text-gray-500">No polls yet. Create one in the Polls tab first.</p>
+                          ) : (
+                            polls.map((poll) => (
+                              <div key={poll.id} className="flex flex-col gap-1">
+                                <label className="text-xs font-medium text-gray-600">{poll.title || poll.id}</label>
+                                <input
+                                  type="text"
+                                  value={pollBackupSheetNames[poll.id] ?? ''}
+                                  onChange={(e) => setPollBackupSheetNames((prev) => ({ ...prev, [poll.id]: e.target.value }))}
+                                  placeholder={pollBackupSheetName || 'Poll_Results'}
+                                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                                />
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div className="p-4 border-t border-gray-200 flex justify-end gap-2">
+                          <button type="button" onClick={() => setShowPollBackupSheetModal(false)} className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">Done</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Reading: Railway or Apps Script */}
+                {/* Web App script (for writing) — only script needed for sheet writes */}
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Web App script (for writing)</p>
+                  <p className="text-xs text-gray-500 mb-2">
+                    This is the only Google script needed for writing. In your sheet: Extensions → Apps Script, paste the script, Deploy → New deployment → Web app (Execute as: Me, Who has access: Anyone). Paste the Web App URL in the box above. Railway does not run any script — it only forwards requests from the app to the Web App.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(GOOGLE_SHEET_SCRIPT);
+                        setCopyFeedback('script');
+                        setScriptCopied(true);
+                        setTimeout(() => { setScriptCopied(false); setCopyFeedback(null); }, 2000);
+                      } catch (_) {
+                        setSheetError('Copy failed.');
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-800"
+                  >
+                    {copyFeedback === 'script' ? 'Copied!' : 'Copy Web App script'}
+                  </button>
+                </div>
+
+                {/* Reading: Railway (recommended) or Firestore */}
                 <div className="mt-6 pt-4 border-t border-gray-200">
                   <p className="text-sm font-medium text-gray-700 mb-2">Reading into the sheet (optional)</p>
-                  <p className="text-xs text-gray-500 mb-2">Event ID for scripts: copy from below. Use the same API key as in your .env (VITE_FIREBASE_API_KEY) and set LIVE_STATE_EVENT_ID in script CONFIG.</p>
+                  <p className="text-xs text-gray-500 mb-2">To pull live Q&A and poll data into the sheet, use Railway (no Google script). Set the Railway URL below — same URL is used for writes (proxy) and for these formulas.</p>
                   {eventId && (
                     <div className="flex flex-wrap items-center gap-2 mb-3 p-2 bg-gray-50 border border-gray-200 rounded">
                       <span className="text-xs text-gray-600">Event ID:</span>
@@ -612,72 +662,20 @@ export default function EventDetailPage() {
                       </button>
                     </div>
                   )}
-                  <p className="text-sm font-medium text-gray-700 mb-2">Copy script for your Google Sheet</p>
-                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                    <label className="text-xs text-gray-600">Script:</label>
-                    <select
-                      value={scriptVariant}
-                      onChange={(e) => setScriptVariant(e.target.value as 'webapp' | 'firestore' | 'firestore_simple' | 'railway')}
-                      className="text-sm border border-gray-300 rounded px-2 py-1"
-                    >
-                      <option value="railway">Railway – Live CSV (no script, no Blaze)</option>
-                      <option value="firestore">Free plan (full – standalone or sheet, with doGet/testAuth)</option>
-                      <option value="firestore_simple">Free plan (simple – sheet only, from docs)</option>
-                      <option value="webapp">Web App – needs Blaze + proxy or direct POST</option>
-                    </select>
-                    {scriptVariant !== 'railway' && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const script = scriptVariant === 'firestore' ? GOOGLE_SHEET_SCRIPT_FIRESTORE : scriptVariant === 'firestore_simple' ? GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE : GOOGLE_SHEET_SCRIPT;
-                        try {
-                          await navigator.clipboard.writeText(script);
-                          setCopyFeedback('script');
-                          setScriptCopied(true);
-                          setTimeout(() => { setScriptCopied(false); setCopyFeedback(null); }, 2000);
-                        } catch (_) {
-                          setSheetError('Copy failed. Select and copy the script below manually.');
-                        }
-                      }}
-                      className="shrink-0 px-3 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-800"
-                    >
-                      {copyFeedback === 'script' ? 'Copied!' : 'Copy script'}
-                    </button>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500 mb-2">
-                    {scriptVariant === 'railway'
-                      ? 'Deploy the live-csv-server to Railway, paste your Railway URL below, then copy the formula into a cell. No Blaze, no Apps Script.'
-                      : scriptVariant === 'firestore'
-                      ? 'Full script: runs from sheet or standalone (script.google.com). CONFIG: API key, Event ID, optional SPREADSHEET_ID for standalone.'
-                      : scriptVariant === 'firestore_simple'
-                      ? 'Simple script (sheet only): create from the sheet (Extensions → Apps Script). CONFIG: API key and Event ID from above. Run testAuth first, then runLiveSync.'
-                      : 'Deploy as Web app (Deploy → New deployment → Web app). Paste the Web App URL in the Writing section above. May need a proxy on Blaze for CORS.'}
-                  </p>
-                  {scriptVariant === 'firestore' && (
-                    <p className="text-xs text-amber-700 mb-2">
-                      <strong>Getting &quot;unknown error&quot;?</strong> Use STANDALONE: go to script.google.com → New project → paste this script. In CONFIG set <strong>SPREADSHEET_ID</strong> to the ID from your sheet URL (the part between /d/ and /edit). Then run testAuth, then runLiveSync. Use a personal Gmail if you can.
-                    </p>
-                  )}
-                  {scriptVariant === 'firestore_simple' && (
-                    <p className="text-xs text-amber-700 mb-2">
-                      <strong>Getting &quot;unknown error&quot;?</strong> Run <strong>testAuth</strong> first: in the script editor, open the function dropdown (next to Run), select <strong>testAuth</strong>, click Run. When the browser asks for permission, click Advanced → Go to … (unsafe) if you see &quot;This app isn&apos;t verified&quot;, then Allow. After that, run <strong>runLiveSync</strong>. Use a personal Gmail if you can.
-                    </p>
-                  )}
-                  {scriptVariant === 'railway' && (
-                    <div className="space-y-3 mb-2">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Railway CSV server URL</label>
-                        <input
-                          type="text"
-                          value={railwayBaseUrl}
-                          onChange={(e) => setRailwayBaseUrl(e.target.value)}
-                          placeholder="https://your-app.up.railway.app"
-                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Paste your Railway app URL (from Railway dashboard → Domains). Save above to persist.</p>
-                      </div>
-                      {railwayImportDataFormula && (
+
+                  <div className="space-y-3 mb-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Railway URL</label>
+                      <input
+                        type="text"
+                        value={railwayBaseUrl}
+                        onChange={(e) => setRailwayBaseUrl(e.target.value)}
+                        placeholder="https://your-app.up.railway.app"
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Deploy the repo to Railway (root: live-csv-server). Set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT in Railway. No Google script on Railway.</p>
+                    </div>
+                    {railwayImportDataFormula && (
                         <div className="space-y-4">
                           <div>
                             <div className="flex flex-wrap items-center gap-2">
@@ -736,11 +734,43 @@ export default function EventDetailPage() {
                           <p className="text-xs text-gray-500">Sheets refreshes periodically. See docs/Railway-Deploy-Step-by-Step.md.</p>
                         </div>
                       )}
+
+                  <details className="mt-4">
+                    <summary className="text-sm font-medium text-gray-700 cursor-pointer">Alternative: Firestore sync (no Railway)</summary>
+                    <p className="text-xs text-gray-500 mt-1 mb-2">If you don’t use Railway, you can run a script from Apps Script to pull data. Event ID above; set LIVE_STATE_EVENT_ID and API key in script CONFIG.</p>
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <select
+                        value={scriptVariant}
+                        onChange={(e) => setScriptVariant(e.target.value as 'firestore' | 'firestore_simple')}
+                        className="text-sm border border-gray-300 rounded px-2 py-1"
+                      >
+                        <option value="firestore">Full (standalone or sheet)</option>
+                        <option value="firestore_simple">Simple (sheet only)</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const script = scriptVariant === 'firestore' ? GOOGLE_SHEET_SCRIPT_FIRESTORE : GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE;
+                          try {
+                            await navigator.clipboard.writeText(script);
+                            setCopyFeedback('script');
+                            setTimeout(() => { setCopyFeedback(null); }, 2000);
+                          } catch (_) { setSheetError('Copy failed.'); }
+                        }}
+                        className="px-3 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-800"
+                      >
+                        {copyFeedback === 'script' ? 'Copied!' : 'Copy script'}
+                      </button>
                     </div>
-                  )}
+                    <pre className="mt-2 p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto max-h-48 font-mono whitespace-pre-wrap break-all">
+                      {scriptVariant === 'firestore' ? GOOGLE_SHEET_SCRIPT_FIRESTORE : GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE}
+                    </pre>
+                  </details>
+                    </div>
+                  </div>
 
                   {/* Timed Refresh Script Modal */}
-                  {showRefreshScriptModal && scriptVariant === 'railway' && (
+                  {showRefreshScriptModal && (
                     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]" onClick={() => setShowRefreshScriptModal(false)}>
                       <div className="bg-gray-800 border-2 border-gray-600 rounded-lg shadow-2xl p-6 min-w-[400px] max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col z-[9999]" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-4 shrink-0">
@@ -782,13 +812,7 @@ export default function EventDetailPage() {
                     </div>
                   )}
 
-                  {scriptVariant !== 'railway' && (
-                  <pre className="mt-2 p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto max-h-64 font-mono whitespace-pre-wrap break-all">
-                    {scriptVariant === 'firestore' ? GOOGLE_SHEET_SCRIPT_FIRESTORE : scriptVariant === 'firestore_simple' ? GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE : GOOGLE_SHEET_SCRIPT}
-                  </pre>
-                  )}
                 </div>
-              </div>
             )}
           </div>
         </div>
