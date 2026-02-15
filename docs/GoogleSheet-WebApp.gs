@@ -1,17 +1,45 @@
 /**
  * ON-AIR GFX – Google Apps Script Web App
  * 
- * 1. Open your Google Sheet
- * 2. Extensions → Apps Script
+ * The script writes ONLY to the spreadsheet it is attached to. Add it to the SAME sheet you linked in ON-AIR GFX.
+ * 1. Open the TARGET Google Sheet (the one you linked as "Google Sheet URL")
+ * 2. In that sheet: Extensions → Apps Script
  * 3. Delete any code in Code.gs and paste this entire file
  * 4. Save (Ctrl+S), then Deploy → New deployment
  * 5. Type: Web app. Execute as: Me. Who has access: Anyone
- * 6. Deploy and copy the Web App URL (URL should end with the path exec)
+ * 6. Deploy and copy the Web App URL (must end with /exec). After script changes: Manage deployments -> Edit -> New version -> Deploy.
  * 7. Paste that URL into your event’s "Web App URL (for writing)" in ON-AIR GFX
  */
 
+/**
+ * Called when someone opens the Web App URL in a browser (GET).
+ * Confirms the app is deployed and shows which spreadsheet receives writes.
+ */
+function doGet() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var name = ss.getName();
+    var url = ss.getUrl();
+    var body = {
+      ok: true,
+      message: 'ON-AIR GFX Web App is running. Use POST to write data.',
+      spreadsheet: name,
+      spreadsheetUrl: url,
+      hint: 'Data is written to this spreadsheet. If you expected a different sheet, add this script there (Extensions → Apps Script in that sheet).'
+    };
+    return ContentService.createTextOutput(JSON.stringify(body, null, 2))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
 function doPost(e) {
   try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return jsonResponse(400, { ok: false, error: 'Missing POST body' });
+    }
     var data = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     
@@ -71,7 +99,7 @@ function doPost(e) {
         (d.submitterEmail || '').toString(),
         d.status || 'pending'
       ]]);
-      return jsonResponse(200, { ok: true });
+      return jsonResponse(200, { ok: true, sheetName: data.sheetName, row: nextRow });
     }
 
     // Append one poll snapshot to a backup sheet (one row per play/update)
@@ -95,7 +123,7 @@ function doPost(e) {
         });
       }
       pollBackupSheet.getRange(nextRow, 1, nextRow, row.length).setValues([row]);
-      return jsonResponse(200, { ok: true });
+      return jsonResponse(200, { ok: true, sheetName: data.sheetName, row: nextRow, message: 'Appended to ' + data.sheetName + ' row ' + nextRow });
     }
     
     return jsonResponse(400, { ok: false, error: 'Unknown type or missing fields' });

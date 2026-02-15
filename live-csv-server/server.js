@@ -250,6 +250,7 @@ app.get('/live-poll-csv', async (req, res) => {
 });
 
 // Proxy POST to Google Apps Script Web App (avoids CORS when app calls from browser)
+// redirect: 'manual' so we don't follow Google's redirect to login page (which would return HTML)
 app.post('/sheet-write', async (req, res) => {
   const { url, body } = req.body || {};
   if (!url || typeof body !== 'object') {
@@ -261,8 +262,27 @@ app.post('/sheet-write', async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      redirect: 'manual', // do not follow redirects (Google often redirects POST to login when not "Anyone")
     });
     const text = await out.text();
+
+    // If Google redirected, they're sending POST to a login/consent page — return clear JSON for the app
+    if (out.status >= 300 && out.status < 400) {
+      const location = out.headers.get('location') || '';
+      console.warn('sheet-write: Google redirected POST', out.status, location?.slice(0, 80));
+      res.status(200).set('Content-Type', 'application/json').send(JSON.stringify({
+        ok: false,
+        error: "Google redirected the request (login/consent). In Apps Script: Deploy → Manage deployments → Edit → Who has access: 'Anyone' → Version: New version → Deploy. Use the Web App URL that ends with /exec (not /dev).",
+        redirected: true,
+        status: out.status,
+      }));
+      return;
+    }
+
+    // Log a short preview for debugging (Railway logs)
+    const preview = text.slice(0, 120).replace(/\s+/g, ' ');
+    console.log('sheet-write: Google response', out.status, preview + (text.length > 120 ? '...' : ''));
+
     res.status(out.status).set('Content-Type', 'application/json').send(text || '{}');
   } catch (err) {
     res.status(502).json({ ok: false, error: err?.message || 'Proxy failed' });

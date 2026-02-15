@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { getEvent, getPollsByEvent, getQAsByEvent, updateEvent, updatePoll, deletePoll, deleteQA } from '../services/firestore';
-import { extractSpreadsheetId } from '../services/googleSheets';
+import { extractSpreadsheetId, postToWebApp, getRailwayBaseUrlForSheet, ensureRailwayBaseUrlHasHttps, DEFAULT_RAILWAY_BASE_URL } from '../services/googleSheets';
 import { GOOGLE_SHEET_SCRIPT, GOOGLE_SHEET_SCRIPT_FIRESTORE, GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE, getTimedRefreshScript } from '../constants/googleSheetScript';
 import type { Event, Poll, QandA } from '../types';
 import PollFormEnhanced from '../components/PollFormEnhanced';
@@ -53,12 +53,15 @@ export default function EventDetailPage() {
   const [scriptVariant, setScriptVariant] = useState<'firestore' | 'firestore_simple'>('firestore_simple');
   const [railwayBaseUrl, setRailwayBaseUrl] = useState('');
   const railwayBaseUrlClean = railwayBaseUrl.trim().replace(/\/+$/, '');
-  const railwayLiveQaCsvUrl = eventId && railwayBaseUrlClean ? `${railwayBaseUrlClean}/live-qa-csv?eventId=${encodeURIComponent(eventId)}` : '';
-  const railwayLivePollCsvUrl = eventId && railwayBaseUrlClean ? `${railwayBaseUrlClean}/live-poll-csv?eventId=${encodeURIComponent(eventId)}` : '';
+  const railwayBaseWithHttps = ensureRailwayBaseUrlHasHttps(railwayBaseUrlClean || DEFAULT_RAILWAY_BASE_URL);
+  const railwayLiveQaCsvUrl = eventId && railwayBaseWithHttps ? `${railwayBaseWithHttps}/live-qa-csv?eventId=${encodeURIComponent(eventId)}` : '';
+  const railwayLivePollCsvUrl = eventId && railwayBaseWithHttps ? `${railwayBaseWithHttps}/live-poll-csv?eventId=${encodeURIComponent(eventId)}` : '';
   const railwayImportDataFormula = railwayLiveQaCsvUrl ? `=IMPORTDATA("${railwayLiveQaCsvUrl}")` : '';
   const railwayPollImportDataFormula = railwayLivePollCsvUrl ? `=IMPORTDATA("${railwayLivePollCsvUrl}")` : '';
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [sheetSaveSuccess, setSheetSaveSuccess] = useState(false);
+  const [testWriteLoading, setTestWriteLoading] = useState(false);
+  const [testWriteResult, setTestWriteResult] = useState<string | null>(null);
   const [showRefreshScriptModal, setShowRefreshScriptModal] = useState(false);
 
   useEffect(() => {
@@ -91,7 +94,7 @@ export default function EventDetailPage() {
         setQaBackupSheetNames(eventData.qaBackupSheetNames || {});
         setPollBackupSheetName(eventData.pollBackupSheetName || '');
         setPollBackupSheetNames(eventData.pollBackupSheetNames || {});
-        setRailwayBaseUrl(eventData.railwayLiveCsvBaseUrl || '');
+        setRailwayBaseUrl(eventData.railwayLiveCsvBaseUrl || DEFAULT_RAILWAY_BASE_URL);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load event data');
@@ -445,7 +448,7 @@ export default function EventDetailPage() {
                       setQaBackupSheetNames(event.qaBackupSheetNames || {});
                       setPollBackupSheetName(event.pollBackupSheetName || '');
                       setPollBackupSheetNames(event.pollBackupSheetNames || {});
-                      setRailwayBaseUrl(event.railwayLiveCsvBaseUrl || '');
+                      setRailwayBaseUrl(event.railwayLiveCsvBaseUrl || DEFAULT_RAILWAY_BASE_URL);
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                   >
@@ -457,18 +460,99 @@ export default function EventDetailPage() {
                 {/* Writing: Web App + live cell + backups */}
                 <div className="mt-6 pt-4 border-t border-gray-200">
                   <p className="text-sm font-medium text-gray-700 mb-3">Writing to the sheet (Web App)</p>
-                  <p className="text-xs text-gray-500 mb-3">To write from the app you need the Web App script deployed and its URL below. If you only use Railway formulas to read, you can leave this blank.</p>
+                  <p className="text-xs text-gray-500 mb-3">To write from the app you need the Web App script deployed and its URL below. Writes go through <strong>Railway</strong> (Reading section). If you leave Railway URL blank, the app uses <strong>on-air-gfx-production.up.railway.app</strong> by default.</p>
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+                    <strong>Data goes to the spreadsheet the script is in.</strong> The script always writes to the same Google Sheet where you added it (Extensions → Apps Script). Open the sheet from the link above, then go to <strong>Extensions → Apps Script</strong> in <em>that</em> sheet and paste the Web App script there. If you added the script to a different spreadsheet, data will be there — check that sheet or move the script into this one.
+                  </p>
                   <div className="space-y-3">
                     <div>
                       <label htmlFor="webapp-url" className="block text-sm font-medium text-gray-700 mb-1">Web App URL</label>
-                      <input
-                        id="webapp-url"
-                        type="text"
-                        value={webAppUrl}
-                        onChange={(e) => setWebAppUrl(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="https://script.google.com/macros/s/.../exec"
-                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          id="webapp-url"
+                          type="text"
+                          value={webAppUrl}
+                          onChange={(e) => { setWebAppUrl(e.target.value); setTestWriteResult(null); }}
+                          className="flex-1 min-w-[200px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="https://script.google.com/macros/s/.../exec"
+                        />
+                        <button
+                          type="button"
+                          disabled={!webAppUrl.trim() || testWriteLoading}
+                          title={`Test writes to tab "${pollBackupSheetName.trim() || 'Poll_Results'}"`}
+                          onClick={async () => {
+                            setTestWriteResult(null);
+                            setTestWriteLoading(true);
+                            try {
+                              const proxyBase = getRailwayBaseUrlForSheet(railwayBaseUrl);
+                              const res = await postToWebApp(
+                                webAppUrl.trim(),
+                                {
+                                  type: 'poll_backup',
+                                  sheetName: pollBackupSheetName.trim() || 'Poll_Results',
+                                  data: {
+                                    timestamp: new Date().toISOString(),
+                                    id: 'test',
+                                    title: 'Test write',
+                                    options: [{ text: 'Option A', votes: 1 }],
+                                  },
+                                },
+                                proxyBase
+                              );
+                              const text = await res.text();
+                              const looksLikeHtml = typeof text === 'string' && (text.trim().startsWith('<') || text.trim().startsWith('<!'));
+                              let resultOk = res.ok;
+                              let resultError = '';
+                              let resultMessage = '';
+                              if (looksLikeHtml) {
+                                resultOk = false;
+                                resultError = 'The Web App returned a page instead of JSON. In Apps Script: Deploy → Manage deployments → Edit. Set "Who has access" to "Anyone" (not "Anyone with Google account"). New version → Deploy. Railway cannot sign in.';
+                              } else {
+                                try {
+                                  const json = JSON.parse(text || '{}');
+                                  if (json && json.ok === false && json.error) {
+                                    resultOk = false;
+                                    resultError = json.error;
+                                  } else if (json && json.message) {
+                                    resultMessage = json.message;
+                                  } else if (json && json.sheetName && json.row) {
+                                    resultMessage = `Wrote to tab "${json.sheetName}" row ${json.row}. Check that tab in the spreadsheet.`;
+                                  } else if (res.ok && (!json || json.ok !== true) && !json.sheetName) {
+                                    resultOk = false;
+                                    resultError = 'Response missing ok/sheetName. Redeploy the Web App: Deploy → Manage deployments → Edit → Version: New version → Deploy.';
+                                  }
+                                } catch (_) {
+                                  if (res.ok) {
+                                    resultOk = false;
+                                    resultError = 'Response was not valid JSON. Set deployment to "Who has access: Anyone" and redeploy.';
+                                  }
+                                }
+                              }
+                              if (resultOk) {
+                                const tabName = pollBackupSheetName.trim() || 'Poll_Results';
+                                const proxyHost = proxyBase.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+                                setTestWriteResult(resultMessage || `Success — check the tab named "${tabName}" in your spreadsheet (bottom tabs). Via Railway: ${proxyHost}`);
+                              } else {
+                                setTestWriteResult(`Failed: ${resultError || text?.slice(0, 200) || res.statusText}`);
+                              }
+                            } catch (err) {
+                              const msg = err instanceof Error ? err.message : String(err);
+                              setTestWriteResult(`Error: ${msg}. Set Railway URL below so the app can reach the Web App.`);
+                            } finally {
+                              setTestWriteLoading(false);
+                            }
+                          }}
+                          className="shrink-0 px-3 py-2 text-sm bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {testWriteLoading ? 'Testing…' : 'Test write'}
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Test writes to the tab named &quot;{pollBackupSheetName.trim() || 'Poll_Results'}&quot; (your Poll backup sheet above).</p>
+                      {testWriteResult && (
+                        <p className={`mt-1.5 text-xs ${testWriteResult.startsWith('Success') ? 'text-green-700' : 'text-amber-700'}`}>
+                          {testWriteResult}
+                        </p>
+                      )}
                     </div>
                     <div className="flex gap-4 flex-wrap">
                       <div className="flex-1 min-w-[120px]">
@@ -500,7 +584,7 @@ export default function EventDetailPage() {
                   <div className="mt-4">
                     <p className="text-sm font-medium text-gray-700 mb-2">Backup sheets (optional)</p>
                     <p className="text-xs text-gray-500 mb-2">
-                      Writing uses the <strong>Web App</strong> script only (see below). Set the <strong>Railway URL</strong> in the Reading section so the app can send writes through Railway. No script runs on Railway — it just forwards requests to the Web App.
+                      Writing uses the <strong>Web App</strong> script only (see below). Railway URL in the Reading section is used for writes (default: on-air-gfx-production.up.railway.app). No script runs on Railway — it just forwards requests to the Web App.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
@@ -642,7 +726,7 @@ export default function EventDetailPage() {
                 {/* Reading: Railway (recommended) or Firestore */}
                 <div className="mt-6 pt-4 border-t border-gray-200">
                   <p className="text-sm font-medium text-gray-700 mb-2">Reading into the sheet (optional)</p>
-                  <p className="text-xs text-gray-500 mb-2">To pull live Q&A and poll data into the sheet, use Railway (no Google script). Set the Railway URL below — same URL is used for writes (proxy) and for these formulas.</p>
+                  <p className="text-xs text-gray-500 mb-2">To pull live Q&A and poll data into the sheet, use Railway (no Google script). Railway URL below is used for reads and for writes (proxy). Defaults to <strong>on-air-gfx-production.up.railway.app</strong> if left blank.</p>
                   {eventId && (
                     <div className="flex flex-wrap items-center gap-2 mb-3 p-2 bg-gray-50 border border-gray-200 rounded">
                       <span className="text-xs text-gray-600">Event ID:</span>
@@ -665,12 +749,12 @@ export default function EventDetailPage() {
 
                   <div className="space-y-3 mb-2">
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Railway URL</label>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Railway URL (optional; default used if blank)</label>
                       <input
                         type="text"
                         value={railwayBaseUrl}
                         onChange={(e) => setRailwayBaseUrl(e.target.value)}
-                        placeholder="https://your-app.up.railway.app"
+                        placeholder={DEFAULT_RAILWAY_BASE_URL}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
                       />
                       <p className="text-xs text-gray-500 mt-1">Deploy the repo to Railway (root: live-csv-server). Set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT in Railway. No Google script on Railway.</p>
@@ -793,13 +877,13 @@ export default function EventDetailPage() {
                           <p className="text-xs text-gray-500">Script writes Q&A to &quot;Live Q&A&quot; (A1) and Poll to &quot;Live Poll&quot; (A1). Edit CONFIG to change.</p>
                           <div className="relative">
                             <pre className="p-4 bg-gray-900 border border-gray-600 rounded text-xs overflow-auto max-h-[320px] font-mono whitespace-pre-wrap break-words text-gray-300">
-                              {getTimedRefreshScript(railwayBaseUrlClean || 'https://your-app.up.railway.app', eventId || 'YOUR_EVENT_ID')}
+                              {getTimedRefreshScript(railwayBaseWithHttps, eventId || 'YOUR_EVENT_ID')}
                             </pre>
                             <button
                               type="button"
                               onClick={async () => {
                                 try {
-                                  await navigator.clipboard.writeText(getTimedRefreshScript(railwayBaseUrlClean || 'https://your-app.up.railway.app', eventId || 'YOUR_EVENT_ID'));
+                                  await navigator.clipboard.writeText(getTimedRefreshScript(railwayBaseWithHttps, eventId || 'YOUR_EVENT_ID'));
                                 } catch (_) {}
                               }}
                               className="absolute top-2 right-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded"

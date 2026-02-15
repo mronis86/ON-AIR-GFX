@@ -1,7 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getEvent, getQA, submitPublicQuestion } from '../services/firestore';
-import { getQaBackupSheetName, postToWebApp } from '../services/googleSheets';
+import { getQaBackupSheetName, postToWebApp, getRailwayBaseUrlForSheet } from '../services/googleSheets';
 import type { QandA } from '../types';
 
 export default function PublicQAPage() {
@@ -87,9 +87,7 @@ export default function PublicQAPage() {
       setSubmitted(true);
       if (qa.eventId) {
         const eventData = await getEvent(qa.eventId);
-        const qaBackupEnabled =
-          eventData?.googleSheetWebAppUrl?.trim() &&
-          (eventData?.qaBackupSheetName?.trim() || (eventData?.qaBackupSheetNames && Object.keys(eventData.qaBackupSheetNames).some((k) => eventData!.qaBackupSheetNames![k]?.trim())));
+        const qaBackupEnabled = eventData?.googleSheetWebAppUrl?.trim();
         if (qaBackupEnabled && eventData?.googleSheetWebAppUrl) {
           const ev = eventData;
           const webAppUrl = ev.googleSheetWebAppUrl!.trim();
@@ -107,7 +105,7 @@ export default function PublicQAPage() {
                 status: 'pending',
               },
             },
-            ev.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '')
+            getRailwayBaseUrlForSheet(ev.railwayLiveCsvBaseUrl)
           ).catch((err: unknown) => console.warn('Q&A backup to sheet failed:', err));
         }
       }

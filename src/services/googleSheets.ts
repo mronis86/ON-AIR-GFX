@@ -102,6 +102,24 @@ export function getPollBackupSheetName(
   return (event.pollBackupSheetName || '').trim() || 'Poll_Results';
 }
 
+/** Default Railway base URL for sheet writes (proxy). Override with VITE_RAILWAY_DEFAULT_URL in .env. */
+export const DEFAULT_RAILWAY_BASE_URL =
+  (import.meta.env.VITE_RAILWAY_DEFAULT_URL as string) || 'https://on-air-gfx-production.up.railway.app';
+
+/** Ensure base URL has a protocol so IMPORTDATA and fetch work (Google requires https). */
+export function ensureRailwayBaseUrlHasHttps(base: string): string {
+  const u = (base || '').trim().replace(/\/+$/, '');
+  if (!u) return DEFAULT_RAILWAY_BASE_URL;
+  if (/^https?:\/\//i.test(u)) return u;
+  return 'https://' + u;
+}
+
+/** Resolve Railway base URL for sheet writes: event value or default so you don't have to set it. */
+export function getRailwayBaseUrlForSheet(eventRailwayUrl?: string | null): string {
+  const u = eventRailwayUrl?.trim().replace(/\/+$/, '');
+  return ensureRailwayBaseUrlHasHttps(u || DEFAULT_RAILWAY_BASE_URL);
+}
+
 /** Proxy URL for Google Web App (avoids CORS). Built from Firebase project when available. */
 function getSheetProxyUrl(): string {
   const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { getEvent, getPoll, getPollsByEvent, submitPollVotes, getQAsByEvent, submitPublicQuestion } from '../services/firestore';
-import { getPollBackupSheetName, getQaBackupSheetName, postToWebApp } from '../services/googleSheets';
+import { getPollBackupSheetName, getQaBackupSheetName, postToWebApp, getRailwayBaseUrlForSheet } from '../services/googleSheets';
 import type { Event, Poll, QandA } from '../types';
 
 type TabType = 'polls' | 'qa';
@@ -125,9 +125,7 @@ export default function PublicEventPage() {
       await submitPollVotes(pollId, selectedOptions);
       setSubmittedPolls(prev => new Set([...prev, pollId]));
       // Backup poll to sheet on user vote (in advance of operators)
-      const pollBackupEnabled =
-        event?.googleSheetWebAppUrl?.trim() &&
-        (event?.pollBackupSheetName?.trim() || (event?.pollBackupSheetNames && Object.keys(event.pollBackupSheetNames).some((k) => event!.pollBackupSheetNames![k]?.trim())));
+      const pollBackupEnabled = event?.googleSheetWebAppUrl?.trim();
       if (pollBackupEnabled) {
         const updatedPoll = await getPoll(pollId);
         if (updatedPoll) {
@@ -143,7 +141,7 @@ export default function PublicEventPage() {
                 options: (updatedPoll.options || []).map(o => ({ text: o.text, votes: o.votes ?? 0 })),
               },
             },
-            event!.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '')
+            getRailwayBaseUrlForSheet(event!.railwayLiveCsvBaseUrl)
           ).catch((err: unknown) => console.warn('Poll backup to sheet failed:', err));
         }
       }
@@ -220,9 +218,7 @@ export default function PublicEventPage() {
         qaIsAnonymous[qaId] || false
       );
       setSubmittedQAs(prev => new Set([...prev, qaId]));
-      const qaBackupEnabled =
-        event?.googleSheetWebAppUrl?.trim() &&
-        (event?.qaBackupSheetName?.trim() || (event?.qaBackupSheetNames && Object.keys(event.qaBackupSheetNames).some((k) => event!.qaBackupSheetNames![k]?.trim())));
+      const qaBackupEnabled = event?.googleSheetWebAppUrl?.trim();
       if (qaBackupEnabled && event?.googleSheetWebAppUrl) {
         const ev = event;
         const webAppUrl = ev.googleSheetWebAppUrl!.trim();
@@ -240,7 +236,7 @@ export default function PublicEventPage() {
               status: 'pending',
             },
           },
-          ev.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '')
+          getRailwayBaseUrlForSheet(ev.railwayLiveCsvBaseUrl)
         ).catch((err: unknown) => console.warn('Q&A backup to sheet failed:', err));
       }
     } catch (err) {

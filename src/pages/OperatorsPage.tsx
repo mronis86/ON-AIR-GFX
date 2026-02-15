@@ -5,7 +5,7 @@ import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
 import { getAnimationClasses, getTransitionInClass, afterDelayThenPaint, saveAnimationSettings, getAnimationSettings } from '../utils/animations';
-import { getPollBackupSheetName, postToWebApp } from '../services/googleSheets';
+import { getPollBackupSheetName, postToWebApp, getRailwayBaseUrlForSheet, ensureRailwayBaseUrlHasHttps, DEFAULT_RAILWAY_BASE_URL } from '../services/googleSheets';
 import { buildLiveQaCsv6, buildPollCsv, downloadCsv } from '../utils/liveDataCsv';
 import { getTimedRefreshScript } from '../constants/googleSheetScript';
 
@@ -84,7 +84,6 @@ export default function OperatorsPage() {
   const [expandedPollId, setExpandedPollId] = useState<string | null>(null);
   const [csvSourceSessionId, setCsvSourceSessionId] = useState<string | null>(null);
   const [csvSourcePollId, setCsvSourcePollId] = useState<string | null>(null);
-  const DEFAULT_RAILWAY_BASE_URL = 'https://on-air-gfx-production.up.railway.app';
   const [operatorRailwayBaseUrl, setOperatorRailwayBaseUrl] = useState(DEFAULT_RAILWAY_BASE_URL);
   const [expandedQAId, setExpandedQAId] = useState<string | null>(null);
   const [previewOutput, setPreviewOutput] = useState<number>(1); // Output 1-4 for preview
@@ -351,9 +350,9 @@ export default function OperatorsPage() {
     const webAppUrl = selectedEvent?.googleSheetWebAppUrl?.trim();
     if (!webAppUrl) return;
 
-    const railwayBase = selectedEvent?.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '');
+    const railwayBase = getRailwayBaseUrlForSheet(selectedEvent?.railwayLiveCsvBaseUrl);
     const post = (body: object) =>
-      postToWebApp(webAppUrl, body, railwayBase || undefined).catch((err: unknown) => console.warn('Google Sheet web app POST failed:', err));
+      postToWebApp(webAppUrl, body, railwayBase).catch((err: unknown) => console.warn('Google Sheet web app POST failed:', err));
 
     if (activePoll?.googleSheetTab?.trim()) {
       post({
@@ -369,9 +368,7 @@ export default function OperatorsPage() {
       });
     }
 
-    const pollBackupEnabled =
-      selectedEvent?.pollBackupSheetName?.trim() ||
-      (selectedEvent?.pollBackupSheetNames && Object.keys(selectedEvent.pollBackupSheetNames).some((k) => (selectedEvent.pollBackupSheetNames as Record<string, string>)[k]?.trim()));
+    const pollBackupEnabled = selectedEvent?.googleSheetWebAppUrl?.trim();
     if (activePoll && selectedEvent && pollBackupEnabled) {
       post({
         type: 'poll_backup',
@@ -1424,7 +1421,7 @@ export default function OperatorsPage() {
               <div className="relative">
                 <pre className="p-4 bg-gray-900 border border-gray-600 rounded text-xs overflow-auto max-h-[320px] font-mono whitespace-pre-wrap break-words text-gray-300">
                   {getTimedRefreshScript(
-                    operatorRailwayBaseUrl.trim().replace(/\/+$/, '') || 'https://your-app.up.railway.app',
+                    ensureRailwayBaseUrlHasHttps(operatorRailwayBaseUrl.trim().replace(/\/+$/, '') || DEFAULT_RAILWAY_BASE_URL),
                     selectedEventId || 'YOUR_EVENT_ID'
                   )}
                 </pre>
@@ -1434,7 +1431,7 @@ export default function OperatorsPage() {
                     try {
                       await navigator.clipboard.writeText(
                         getTimedRefreshScript(
-                          operatorRailwayBaseUrl.trim().replace(/\/+$/, '') || 'https://your-app.up.railway.app',
+                          ensureRailwayBaseUrlHasHttps(operatorRailwayBaseUrl.trim().replace(/\/+$/, '') || DEFAULT_RAILWAY_BASE_URL),
                           selectedEventId || 'YOUR_EVENT_ID'
                         )
                       );
@@ -1877,7 +1874,7 @@ export default function OperatorsPage() {
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const base = operatorRailwayBaseUrl.trim().replace(/\/+$/, '');
+                                  const base = ensureRailwayBaseUrlHasHttps(operatorRailwayBaseUrl.trim().replace(/\/+$/, ''));
                                   const url = `${base}/live-qa-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
                                   try {
                                     await navigator.clipboard.writeText(url);
@@ -1890,7 +1887,7 @@ export default function OperatorsPage() {
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const base = operatorRailwayBaseUrl.trim().replace(/\/+$/, '');
+                                  const base = ensureRailwayBaseUrlHasHttps(operatorRailwayBaseUrl.trim().replace(/\/+$/, ''));
                                   const url = `${base}/live-qa-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
                                   try {
                                     await navigator.clipboard.writeText(`=IMPORTDATA("${url}")`);
@@ -1903,7 +1900,7 @@ export default function OperatorsPage() {
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const base = operatorRailwayBaseUrl.trim().replace(/\/+$/, '');
+                                  const base = ensureRailwayBaseUrlHasHttps(operatorRailwayBaseUrl.trim().replace(/\/+$/, ''));
                                   const url = `${base}/live-poll-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
                                   try {
                                     await navigator.clipboard.writeText(url);
@@ -1916,7 +1913,7 @@ export default function OperatorsPage() {
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const base = operatorRailwayBaseUrl.trim().replace(/\/+$/, '');
+                                  const base = ensureRailwayBaseUrlHasHttps(operatorRailwayBaseUrl.trim().replace(/\/+$/, ''));
                                   const url = `${base}/live-poll-csv?eventId=${encodeURIComponent(selectedEventId!)}`;
                                   try {
                                     await navigator.clipboard.writeText(`=IMPORTDATA("${url}")`);

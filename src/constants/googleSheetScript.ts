@@ -14,11 +14,24 @@ export const GOOGLE_SHEET_SCRIPT = `/**
  * 7. Paste that URL into your event's "Web App URL (for writing)" in ON-AIR GFX
  */
 
+function doGet() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var name = ss.getName();
+    var url = ss.getUrl();
+    var body = { ok: true, message: 'ON-AIR GFX Web App is running. Use POST to write data.', spreadsheet: name, spreadsheetUrl: url, hint: 'Data is written to this spreadsheet. If you expected a different sheet, add this script there (Extensions → Apps Script in that sheet).' };
+    return ContentService.createTextOutput(JSON.stringify(body, null, 2)).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
 function doPost(e) {
   try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return jsonResponse(400, { ok: false, error: 'Missing POST body' });
+    }
     var data = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    
     if (data.type === 'initialize' && data.sheetNames && Array.isArray(data.sheetNames)) {
       data.sheetNames.forEach(function(name) {
         if (name && !ss.getSheetByName(name)) {
@@ -73,7 +86,7 @@ function doPost(e) {
         (d.submitterEmail || '').toString(),
         d.status || 'pending'
       ]]);
-      return jsonResponse(200, { ok: true });
+      return jsonResponse(200, { ok: true, sheetName: data.sheetName, row: nextRow });
     }
     if (data.type === 'poll_backup' && data.sheetName && data.data) {
       var pollBackupSheet = getOrCreateSheet(ss, data.sheetName);
@@ -95,7 +108,7 @@ function doPost(e) {
         });
       }
       pollBackupSheet.getRange(nextRow, 1, nextRow, row.length).setValues([row]);
-      return jsonResponse(200, { ok: true });
+      return jsonResponse(200, { ok: true, sheetName: data.sheetName, row: nextRow, message: 'Appended to ' + data.sheetName + ' row ' + nextRow });
     }
     return jsonResponse(400, { ok: false, error: 'Unknown type or missing fields' });
   } catch (err) {
