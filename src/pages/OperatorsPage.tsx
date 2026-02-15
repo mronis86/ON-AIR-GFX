@@ -7,6 +7,7 @@ import QADisplay from '../components/QADisplay';
 import { getAnimationClasses, getTransitionInClass, afterDelayThenPaint, saveAnimationSettings, getAnimationSettings } from '../utils/animations';
 import { postToWebApp } from '../services/googleSheets';
 import { buildLiveQaCsv6, buildPollCsv, downloadCsv } from '../utils/liveDataCsv';
+import { getTimedRefreshScript } from '../constants/googleSheetScript';
 
 const OPERATOR_PASSWORD = '1615';
 
@@ -60,7 +61,7 @@ export default function OperatorsPage() {
   const hasUserPressedPlayQARef = useRef(false); // Only show Q&A preview after user clicks Play this session (avoids flash on refresh when Firestore still has isActive)
   const [editingPollId, setEditingPollId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedItemType, setSelectedItemType] = useState<ItemType>('polls');
+  const [selectedItemType, setSelectedItemType] = useState<ItemType>('qa');
   const [showPreviewPopup, setShowPreviewPopup] = useState(false);
   const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
   const [previewSize, setPreviewSize] = useState({ width: 960, height: 540 });
@@ -76,6 +77,7 @@ export default function OperatorsPage() {
   const [qaAnimateInDelayMs, setQAAnimateInDelayMs] = useState(initialAnimationSettings.qaAnimateInDelayMs ?? 100);
   const [showOutputOptions, setShowOutputOptions] = useState(false);
   const [showDownloadCsvModal, setShowDownloadCsvModal] = useState(false);
+  const [showRefreshScriptModal, setShowRefreshScriptModal] = useState(false);
   const [expandedPollId, setExpandedPollId] = useState<string | null>(null);
   const [csvSourceSessionId, setCsvSourceSessionId] = useState<string | null>(null);
   const [csvSourcePollId, setCsvSourcePollId] = useState<string | null>(null);
@@ -1116,26 +1118,27 @@ export default function OperatorsPage() {
     }
   }, [isDragging, isResizing, dragStart, previewPosition]);
 
-  // Reposition preview when window resizes so it stays in view (right-aligned)
+  // On window resize: only clamp preview to viewport if it would go off-screen (do not snap to right)
   useEffect(() => {
-    if (!showPreviewPopup || isDragging) return;
-    const updatePosition = () => {
-      const rightMargin = 20;
-      const topMargin = 80;
-      const maxW = window.innerWidth * 0.9;
-      const maxH = (window.innerHeight - 40) * 0.9;
-      const maxContentH = maxH - 40;
-      const maxWByHeight = (maxContentH * 16) / 9;
-      const w = Math.min(previewSize.width, maxW, maxWByHeight);
-      setPreviewPosition({
-        x: window.innerWidth - w - rightMargin,
-        y: topMargin,
+    if (!showPreviewPopup || isDragging || isResizing) return;
+    const clampToViewport = () => {
+      const margin = 20;
+      const headerH = 40;
+      const w = previewConstrained.width;
+      const h = previewConstrained.height + headerH;
+      setPreviewPosition((prev) => {
+        let x = prev.x;
+        let y = prev.y;
+        if (x + w > window.innerWidth - margin) x = window.innerWidth - w - margin;
+        if (y + h > window.innerHeight - margin) y = window.innerHeight - h - margin;
+        if (x < margin) x = margin;
+        if (y < margin) y = margin;
+        return x === prev.x && y === prev.y ? prev : { x, y };
       });
     };
-    updatePosition();
-    window.addEventListener('resize', updatePosition);
-    return () => window.removeEventListener('resize', updatePosition);
-  }, [showPreviewPopup, previewSize.width, windowSize.w, windowSize.h, isDragging]);
+    window.addEventListener('resize', clampToViewport);
+    return () => window.removeEventListener('resize', clampToViewport);
+  }, [showPreviewPopup, previewConstrained.width, previewConstrained.height, windowSize.w, windowSize.h, isDragging, isResizing]);
 
   // Helper function to get animation classes
 
@@ -1217,12 +1220,12 @@ export default function OperatorsPage() {
                 <button
                   onClick={() => {
                     if (!showPreviewPopup) {
-                      // Calculate top right position
-                      const rightMargin = 20;
-                      const topMargin = 80;
+                      // Center preview in viewport on first open (user can drag to reposition)
+                      const w = Math.min(previewSize.width, window.innerWidth * 0.9);
+                      const h = (w * 9) / 16 + 40;
                       setPreviewPosition({
-                        x: window.innerWidth - previewSize.width - rightMargin,
-                        y: topMargin,
+                        x: (window.innerWidth - w) / 2,
+                        y: Math.max(40, (window.innerHeight - h) / 2),
                       });
                     }
                     setShowPreviewPopup(!showPreviewPopup);
@@ -1362,6 +1365,62 @@ export default function OperatorsPage() {
               {qaQuestions.length === 0 && polls.length === 0 && (
                 <p className="text-gray-500 text-sm py-4">No Q&A or polls to download.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Timed Refresh Script Modal */}
+      {showRefreshScriptModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]" onClick={() => setShowRefreshScriptModal(false)}>
+          <div className="bg-gray-800 border-2 border-gray-600 rounded-lg shadow-2xl p-6 min-w-[400px] max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col z-[9999]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4 shrink-0">
+              <h3 className="text-lg font-semibold text-white">Google Apps Script: Timed CSV Refresh</h3>
+              <button
+                onClick={() => setShowRefreshScriptModal(false)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-3 overflow-y-auto flex-1 min-h-0 pr-2">
+              <p className="text-sm text-gray-300">
+                Use this script for frequent refresh (e.g. every 1 min) instead of IMPORTDATA (which refreshes ~hourly).
+              </p>
+              <ol className="text-sm text-gray-400 list-decimal list-inside space-y-1">
+                <li>Open your Google Sheet → Extensions → Apps Script</li>
+                <li>Delete any code and paste the script below. Save.</li>
+                <li>Run <strong className="text-gray-300">testAuth</strong> once. Authorize when prompted (Advanced → Go to … if &quot;unverified&quot;)</li>
+                <li>Run <strong className="text-gray-300">refreshAll</strong> once to test</li>
+                <li>Triggers: Edit → Current project&apos;s triggers → Add: <strong className="text-gray-300">refreshAll</strong>, Time-driven, Every minute</li>
+              </ol>
+              <p className="text-xs text-gray-500">Script writes Q&A to sheet &quot;Live Q&A&quot; (A1) and Poll to &quot;Live Poll&quot; (A1). Edit CONFIG in script to change.</p>
+              <div className="relative">
+                <pre className="p-4 bg-gray-900 border border-gray-600 rounded text-xs overflow-auto max-h-[320px] font-mono whitespace-pre-wrap break-words text-gray-300">
+                  {getTimedRefreshScript(
+                    operatorRailwayBaseUrl.trim().replace(/\/+$/, '') || 'https://your-app.up.railway.app',
+                    selectedEventId || 'YOUR_EVENT_ID'
+                  )}
+                </pre>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(
+                        getTimedRefreshScript(
+                          operatorRailwayBaseUrl.trim().replace(/\/+$/, '') || 'https://your-app.up.railway.app',
+                          selectedEventId || 'YOUR_EVENT_ID'
+                        )
+                      );
+                    } catch (_) {}
+                  }}
+                  className="absolute top-2 right-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded"
+                >
+                  Copy script
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1748,6 +1807,14 @@ export default function OperatorsPage() {
                               >
                                 Copy Poll formula
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => setShowRefreshScriptModal(true)}
+                                className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs text-white border border-amber-500"
+                                title="Google Apps Script for timed refresh (every 1 min)"
+                              >
+                                Timed refresh script
+                              </button>
                             </div>
                           )}
                         </div>
@@ -1758,17 +1825,6 @@ export default function OperatorsPage() {
                     <div className="mb-6">
                       <div className="flex gap-2 bg-gray-700 rounded-lg p-1 border border-gray-600">
                         <button
-                          onClick={() => setSelectedItemType('polls')}
-                          className={`flex-1 px-3 py-2 rounded-md font-medium transition-all flex items-center justify-center gap-2 ${
-                            selectedItemType === 'polls'
-                              ? 'bg-red-600 text-white shadow-md'
-                              : 'text-gray-400 hover:text-gray-200'
-                          }`}
-                        >
-                          <PollIcon />
-                          Polls
-                        </button>
-                        <button
                           onClick={() => setSelectedItemType('qa')}
                           className={`flex-1 px-3 py-2 rounded-md font-medium transition-all flex items-center justify-center gap-2 ${
                             selectedItemType === 'qa'
@@ -1778,6 +1834,17 @@ export default function OperatorsPage() {
                         >
                           <QAIcon />
                           Q&A
+                        </button>
+                        <button
+                          onClick={() => setSelectedItemType('polls')}
+                          className={`flex-1 px-3 py-2 rounded-md font-medium transition-all flex items-center justify-center gap-2 ${
+                            selectedItemType === 'polls'
+                              ? 'bg-red-600 text-white shadow-md'
+                              : 'text-gray-400 hover:text-gray-200'
+                          }`}
+                        >
+                          <PollIcon />
+                          Polls
                         </button>
                         <button
                           onClick={() => setSelectedItemType('weblinks')}
@@ -2417,16 +2484,28 @@ export default function OperatorsPage() {
             </div>
             <div className="flex items-center gap-2">
               {selectedEventId && (
-                <button
-                  type="button"
-                  onClick={() => setPreviewRefreshKey((k) => k + 1)}
-                  className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-600 transition-colors"
-                  title="Refresh preview"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => window.open(`${window.location.origin}/output/${selectedEventId}/${previewOutput}`, '_blank', 'width=960,height=580')}
+                    className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-600 transition-colors"
+                    title="Pop out to separate window"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewRefreshKey((k) => k + 1)}
+                    className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-600 transition-colors"
+                    title="Refresh preview"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
+                </>
               )}
               <span className="text-xs text-gray-400">Output:</span>
               {[1, 2, 3, 4].map((outputNum) => (

@@ -4,7 +4,7 @@ import { getEvent, getPollsByEvent, getQAsByEvent, getQAsByStatus, subscribePoll
 import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
-import { getAnimationSettings, getAnimationClasses, getTransitionInClass, getAnimationOutStyle, afterDelayThenPaint } from '../utils/animations';
+import { getAnimationSettings, getAnimationClasses, getTransitionInClass, getTransitionOutClass, afterDelayThenPaint } from '../utils/animations';
 import { QAStatus } from '../types';
 
 // Base dimensions for consistent scaling
@@ -563,10 +563,10 @@ export default function FullscreenOutputPage() {
               } : {}),
             }}
           />
-          {/* Content layer: in = keyframe, out = transition via inline style (avoids Tailwind purging dynamic classes) */}
+          {/* Content layer: in/out both use keyframe animations for smooth transitions */}
           <div
             className={`absolute inset-0 flex items-center justify-center hide-scrollbar ${
-              isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'
+              isVisible ? getTransitionInClass(animationSettings.animationInType) : getTransitionOutClass(animationSettings.animationOutType)
             }`}
             style={{
               width: `${BASE_WIDTH}px`,
@@ -574,7 +574,6 @@ export default function FullscreenOutputPage() {
               zIndex: 1,
               background: 'transparent',
               transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-              ...(isVisible ? {} : getAnimationOutStyle(animationSettings.animationOutType)),
               ...(isVisible ? (() => {
                 if (contentType === 'poll') {
                   const poll = activeContent as Poll;
@@ -634,7 +633,7 @@ export default function FullscreenOutputPage() {
               <div className="rounded-lg overflow-hidden" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000' }}>
                 {/* Event page: absolute bottom-0 left-0 right-0 - NO fixed height, sizes to content */}
                 <div
-                  className={`${animationSettings.backgroundAnimateFirst && isVisible ? '' : !animationSettings.backgroundAnimateFirst ? (isVisible ? '' : 'opacity-0') : 'opacity-0'} ${isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'}`}
+                  className={`${animationSettings.backgroundAnimateFirst && isVisible ? '' : !animationSettings.backgroundAnimateFirst ? (isVisible ? '' : 'opacity-0') : 'opacity-0'} ${isVisible ? getTransitionInClass(animationSettings.animationInType) : getTransitionOutClass(animationSettings.animationOutType)}`}
                   style={{
                     position: 'absolute',
                     bottom: 0,
@@ -650,7 +649,6 @@ export default function FullscreenOutputPage() {
                     ...(shouldZoom ? { transform: `scale(${zoomScale})`, transformOrigin: 'center center' } : {}),
                     transition: 'opacity 500ms',
                     transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-                    ...(isVisible ? {} : getAnimationOutStyle(animationSettings.animationOutType)),
                   }}
                 >
                   {/* Event page: div with p-6 (24px padding) */}
@@ -724,13 +722,12 @@ export default function FullscreenOutputPage() {
               <div className="rounded-lg overflow-hidden" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000' }}>
                 {/* Event page: absolute w-96 left-6 or right-6, top 24px, p-4 child */}
                 <div
-                  className={`${animationSettings.backgroundAnimateFirst && isVisible ? '' : !animationSettings.backgroundAnimateFirst ? (isVisible ? '' : 'opacity-0') : 'opacity-0'} ${isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'}`}
+                  className={`${animationSettings.backgroundAnimateFirst && isVisible ? '' : !animationSettings.backgroundAnimateFirst ? (isVisible ? '' : 'opacity-0') : 'opacity-0'} ${isVisible ? getTransitionInClass(animationSettings.animationInType) : getTransitionOutClass(pipOutType)}`}
                   style={{
                     ...pipBoxStyle,
                     zIndex: 1,
                     transition: 'opacity 500ms',
                     transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-                    ...(isVisible ? {} : getAnimationOutStyle(pipOutType)),
                   }}
                 >
                   {/* Event page: div with p-4 (16px padding) */}
@@ -799,13 +796,13 @@ export default function FullscreenOutputPage() {
               borderRadius: qa.borderRadius ? `${qa.borderRadius}px` : '0',
             }}
           />
-          {/* Content layer: in = keyframe, out = transition via inline style */}
+          {/* Content layer: in/out both use keyframe animations */}
           {(() => {
             const splitOutType = splitScreenSide === 'left' ? (animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType) : (animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType);
             return (
           <div
             className={`absolute inset-0 hide-scrollbar ${
-              isVisible ? getTransitionInClass(animationSettings.animationInType) : 'transition-all duration-500 ease-out'
+              isVisible ? getTransitionInClass(animationSettings.animationInType) : getTransitionOutClass(splitOutType)
             }`}
             style={{
               width: `${splitWidth}px`,
@@ -814,7 +811,6 @@ export default function FullscreenOutputPage() {
               background: 'transparent',
               transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
               padding: '32px',
-              ...(isVisible ? {} : getAnimationOutStyle(splitOutType)),
             }}
           >
             {renderContent()}

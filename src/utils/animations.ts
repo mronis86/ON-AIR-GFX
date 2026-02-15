@@ -30,9 +30,21 @@ export const getTransitionInClass = (animationType: AnimationType): string => {
   return map[animationType] ?? 'transition-in-fade';
 };
 
-/** Inline style for animation OUT state. Use this so transform is not purged by Tailwind (dynamic classes).
- *  For slide/scale we only set transform (no opacity) so the content stays visible while it moves off-screen;
- *  otherwise opacity would fade first and the slide would be invisible. */
+/** Class name for transition-out: uses keyframe animation (same as transition-in) so out animates smoothly. */
+export const getTransitionOutClass = (animationType: AnimationType): string => {
+  const map: Record<AnimationType, string> = {
+    fade: 'transition-out-fade',
+    slideUp: 'transition-out-slide-up',
+    slideDown: 'transition-out-slide-down',
+    slideLeft: 'transition-out-slide-left',
+    slideRight: 'transition-out-slide-right',
+    scale: 'transition-out-scale',
+  };
+  return map[animationType] ?? 'transition-out-fade';
+};
+
+/** Inline style for animation OUT state. Use when keyframe classes aren't available (e.g. Tailwind purging).
+ *  Prefer getTransitionOutClass for output page. */
 export const getAnimationOutStyle = (animationType: AnimationType): CSSProperties => {
   switch (animationType) {
     case 'fade':

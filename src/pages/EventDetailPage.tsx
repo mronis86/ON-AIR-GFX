@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { getEvent, getPollsByEvent, getQAsByEvent, updateEvent, updatePoll, deletePoll, deleteQA } from '../services/firestore';
 import { extractSpreadsheetId } from '../services/googleSheets';
-import { GOOGLE_SHEET_SCRIPT, GOOGLE_SHEET_SCRIPT_FIRESTORE, GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE } from '../constants/googleSheetScript';
+import { GOOGLE_SHEET_SCRIPT, GOOGLE_SHEET_SCRIPT_FIRESTORE, GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE, getTimedRefreshScript } from '../constants/googleSheetScript';
 import type { Event, Poll, QandA } from '../types';
 import PollFormEnhanced from '../components/PollFormEnhanced';
 import QAForm from '../components/QAForm';
@@ -19,7 +19,7 @@ export default function EventDetailPage() {
   const [editingPoll, setEditingPoll] = useState<string | null>(null);
   const [showQAForm, setShowQAForm] = useState(false);
   const [editingQA, setEditingQA] = useState<string | null>(null);
-  const [selectedTab, setSelectedTab] = useState<'polls' | 'qa' | 'other'>('polls');
+  const [selectedTab, setSelectedTab] = useState<'polls' | 'qa' | 'other'>('qa');
   const [selectedPollIds, setSelectedPollIds] = useState<Set<string>>(new Set());
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
   const [sessionDetailSession, setSessionDetailSession] = useState<QandA | null>(null);
@@ -52,6 +52,7 @@ export default function EventDetailPage() {
   const railwayPollImportDataFormula = railwayLivePollCsvUrl ? `=IMPORTDATA("${railwayLivePollCsvUrl}")` : '';
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [sheetSaveSuccess, setSheetSaveSuccess] = useState(false);
+  const [showRefreshScriptModal, setShowRefreshScriptModal] = useState(false);
 
   useEffect(() => {
     if (!eventId) return;
@@ -600,6 +601,14 @@ export default function EventDetailPage() {
                                 >
                                   {copyFeedback === 'script' ? 'Copied!' : 'Copy Poll formula'}
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowRefreshScriptModal(true)}
+                                  className="text-xs px-2 py-1 bg-amber-600 text-white rounded hover:bg-amber-700"
+                                  title="Google Apps Script for timed refresh (every 1 min)"
+                                >
+                                  Timed refresh script
+                                </button>
                               </div>
                               <pre className="p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto font-mono whitespace-pre-wrap break-all mt-1">
                                 {railwayPollImportDataFormula}
@@ -612,6 +621,50 @@ export default function EventDetailPage() {
                       )}
                     </div>
                   )}
+
+                  {/* Timed Refresh Script Modal */}
+                  {showRefreshScriptModal && scriptVariant === 'railway' && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]" onClick={() => setShowRefreshScriptModal(false)}>
+                      <div className="bg-gray-800 border-2 border-gray-600 rounded-lg shadow-2xl p-6 min-w-[400px] max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col z-[9999]" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4 shrink-0">
+                          <h3 className="text-lg font-semibold text-white">Google Apps Script: Timed CSV Refresh</h3>
+                          <button onClick={() => setShowRefreshScriptModal(false)} className="text-gray-400 hover:text-white transition-colors">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                        <div className="space-y-3 overflow-y-auto flex-1 min-h-0 pr-2">
+                          <p className="text-sm text-gray-300">Use this script for frequent refresh (e.g. every 1 min) instead of IMPORTDATA (which refreshes ~hourly).</p>
+                          <ol className="text-sm text-gray-400 list-decimal list-inside space-y-1">
+                            <li>Open your Google Sheet → Extensions → Apps Script</li>
+                            <li>Delete any code and paste the script below. Save.</li>
+                            <li>Run <strong className="text-gray-300">testAuth</strong> once. Authorize when prompted.</li>
+                            <li>Run <strong className="text-gray-300">refreshAll</strong> once to test</li>
+                            <li>Triggers: Edit → Current project&apos;s triggers → Add: <strong className="text-gray-300">refreshAll</strong>, Time-driven, Every minute</li>
+                          </ol>
+                          <p className="text-xs text-gray-500">Script writes Q&A to &quot;Live Q&A&quot; (A1) and Poll to &quot;Live Poll&quot; (A1). Edit CONFIG to change.</p>
+                          <div className="relative">
+                            <pre className="p-4 bg-gray-900 border border-gray-600 rounded text-xs overflow-auto max-h-[320px] font-mono whitespace-pre-wrap break-words text-gray-300">
+                              {getTimedRefreshScript(railwayBaseUrlClean || 'https://your-app.up.railway.app', eventId || 'YOUR_EVENT_ID')}
+                            </pre>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(getTimedRefreshScript(railwayBaseUrlClean || 'https://your-app.up.railway.app', eventId || 'YOUR_EVENT_ID'));
+                                } catch (_) {}
+                              }}
+                              className="absolute top-2 right-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded"
+                            >
+                              Copy script
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {scriptVariant !== 'railway' && (
                   <pre className="mt-2 p-3 bg-gray-100 border border-gray-300 rounded text-xs overflow-auto max-h-64 font-mono whitespace-pre-wrap break-all">
                     {scriptVariant === 'firestore' ? GOOGLE_SHEET_SCRIPT_FIRESTORE : scriptVariant === 'firestore_simple' ? GOOGLE_SHEET_SCRIPT_FIRESTORE_SIMPLE : GOOGLE_SHEET_SCRIPT}
@@ -627,19 +680,6 @@ export default function EventDetailPage() {
         <div className="mb-6">
           <div className="flex gap-2 bg-gray-200 rounded-lg p-1 border border-gray-300">
             <button
-              onClick={() => setSelectedTab('polls')}
-              className={`flex-1 px-4 py-2 rounded-md font-medium transition-all flex items-center justify-center gap-2 ${
-                selectedTab === 'polls'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-              Polls
-            </button>
-            <button
               onClick={() => setSelectedTab('qa')}
               className={`flex-1 px-4 py-2 rounded-md font-medium transition-all flex items-center justify-center gap-2 ${
                 selectedTab === 'qa'
@@ -651,6 +691,19 @@ export default function EventDetailPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               Q&A
+            </button>
+            <button
+              onClick={() => setSelectedTab('polls')}
+              className={`flex-1 px-4 py-2 rounded-md font-medium transition-all flex items-center justify-center gap-2 ${
+                selectedTab === 'polls'
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              Polls
             </button>
             <button
               onClick={() => setSelectedTab('other')}

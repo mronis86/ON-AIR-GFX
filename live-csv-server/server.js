@@ -61,14 +61,18 @@ function buildQaCsv(liveData, qaDocs) {
     cue = questions.find((q) => q.isQueued) || null;
     next = questions.find((q) => q.isNext) || null;
   }
-  const row = [
-    escapeCsv(active?.question ?? ''),
-    escapeCsv(active?.submitterName ?? ''),
-    escapeCsv(cue?.question ?? ''),
-    escapeCsv(cue?.submitterName ?? ''),
-    escapeCsv(next?.question ?? ''),
-    escapeCsv(next?.submitterName ?? ''),
-  ].join(',');
+  // When no QA has active, cue, or next, return empty data to avoid hanging old values
+  const emptyRow = ',,,,,';
+  const row = (!active && !cue && !next)
+    ? emptyRow
+    : [
+        escapeCsv(active?.question ?? ''),
+        escapeCsv(active?.submitterName ?? ''),
+        escapeCsv(cue?.question ?? ''),
+        escapeCsv(cue?.submitterName ?? ''),
+        escapeCsv(next?.question ?? ''),
+        escapeCsv(next?.submitterName ?? ''),
+      ].join(',');
   const rows = ['Question ACTIVE,Name ACTIVE,Question Cue,Name Cue,Question Next,Name Next', row];
   return '\uFEFF' + rows.join('\r\n');
 }
