@@ -11,6 +11,8 @@ import {
   where,
   deleteField,
   serverTimestamp,
+  onSnapshot,
+  Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type { Event, Poll, QandA } from '../types';
@@ -188,6 +190,15 @@ export const getPollsByEvent = async (eventId: string): Promise<Poll[]> => {
     id: doc.id,
     ...doc.data(),
   })) as Poll[];
+};
+
+/** Subscribe to polls for an event - Firestore only sends updates when data changes (reduces reads). */
+export const subscribePollsByEvent = (eventId: string, callback: (polls: Poll[]) => void): Unsubscribe => {
+  const q = query(collection(db, pollsCollection), where('eventId', '==', eventId));
+  return onSnapshot(q, (snapshot) => {
+    const polls = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Poll));
+    callback(polls);
+  });
 };
 
 export const updatePoll = async (pollId: string, updates: Partial<Poll>): Promise<void> => {
@@ -388,6 +399,15 @@ export const getQAsByEvent = async (eventId: string): Promise<QandA[]> => {
     id: doc.id,
     ...doc.data(),
   })) as QandA[];
+};
+
+/** Subscribe to Q&A for an event - Firestore only sends updates when data changes (reduces reads). */
+export const subscribeQAsByEvent = (eventId: string, callback: (qas: QandA[]) => void): Unsubscribe => {
+  const q = query(collection(db, qaCollection), where('eventId', '==', eventId));
+  return onSnapshot(q, (snapshot) => {
+    const qas = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as QandA));
+    callback(qas);
+  });
 };
 
 export const getQAsByStatus = async (eventId: string, status: string): Promise<QandA[]> => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { getEvent, getPollsByEvent, getQAsByEvent, getQAsByStatus } from '../services/firestore';
+import { getEvent, getPollsByEvent, getQAsByEvent, getQAsByStatus, subscribePollsByEvent, subscribeQAsByEvent } from '../services/firestore';
 import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
@@ -118,64 +118,6 @@ export default function FullscreenOutputPage() {
   useEffect(() => {
     if (!eventId) return;
 
-    // Helper function to find active content (polls take priority over Q&As) - moved outside for reuse
-    const findActiveContent = (pollsData: Poll[], qasData: QandA[]) => {
-      // First check polls
-      const activePoll = pollsData.find((p) => {
-        if (!p.isActive) return false;
-        const outputSettings = p.outputSettings || {};
-        return (
-          (outputSettings.fullScreen?.includes(outputNum)) ||
-          (outputSettings.lowerThird?.includes(outputNum)) ||
-          (outputSettings.pip?.includes(outputNum))
-        );
-      });
-      
-      if (activePoll) {
-        const outputSettings = activePoll.outputSettings || {};
-        let layoutToShow = activePoll.layoutStyle || 1;
-        if (outputSettings.fullScreen?.includes(outputNum)) {
-          layoutToShow = 1;
-        } else if (outputSettings.lowerThird?.includes(outputNum)) {
-          layoutToShow = 2;
-        } else if (outputSettings.pip?.includes(outputNum)) {
-          layoutToShow = 3;
-        }
-        return { content: { ...activePoll, layoutStyle: layoutToShow } as Poll, type: 'poll' as ContentType };
-      }
-      
-      // Then check Q&As
-      // Filter to only check individual Q&A questions (submissions), not session containers
-      const qaQuestions = qasData.filter(qa => qa.question && !qa.name);
-      const activeQA = qaQuestions.find((qa) => {
-        if (!qa.isActive) return false;
-        const outputSettings = qa.outputSettings || {};
-        return (
-          (outputSettings.fullScreen?.includes(outputNum)) ||
-          (outputSettings.lowerThird?.includes(outputNum)) ||
-          (outputSettings.splitScreen?.includes(outputNum)) ||
-          (outputSettings.pip?.includes(outputNum))
-        );
-      });
-      
-      if (activeQA) {
-        const outputSettings = activeQA.outputSettings || {};
-        let layoutToShow = activeQA.layoutStyle || 1;
-        if (outputSettings.fullScreen?.includes(outputNum)) {
-          layoutToShow = 1;
-        } else if (outputSettings.lowerThird?.includes(outputNum)) {
-          layoutToShow = 2;
-        } else if (outputSettings.pip?.includes(outputNum)) {
-          layoutToShow = 3;
-        } else if (outputSettings.splitScreen?.includes(outputNum)) {
-          layoutToShow = 4;
-        }
-        return { content: { ...activeQA, layoutStyle: layoutToShow } as QandA, type: 'qa' as ContentType };
-      }
-      
-      return null;
-    };
-
     const loadData = async () => {
       try {
         const [eventData, pollsData, qasData] = await Promise.all([
@@ -203,7 +145,7 @@ export default function FullscreenOutputPage() {
         });
         const enrichedQasData = [...qaSessions, ...qaQuestionsWithSettings];
         
-        const activeResult = findActiveContent(pollsData, enrichedQasData);
+        const activeResult = findActiveContentForOutput(pollsData, enrichedQasData);
         
         if (activeResult) {
           setActiveContent(activeResult.content);
@@ -225,76 +167,63 @@ export default function FullscreenOutputPage() {
       lastLoadedEventOutput.current = eventId && outputNum ? { eventId, outputNum } : null;
       loadData();
     }
-    // Set up real-time listener for active content and updates
-    const interval = setInterval(async () => {
-      try {
-        const [pollsData, qasData] = await Promise.all([
-          getPollsByEvent(eventId),
-          getQAsByEvent(eventId),
-        ]);
-        
-        // For Q&A questions without outputSettings, copy from parent session or use default so active Q&A is always findable
-        const defaultOutputSettings = { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
-        const qaSessions = qasData.filter(qa => qa.name && !qa.question);
-        const qaQuestions = qasData.filter(qa => qa.question && !qa.name);
-        const qaQuestionsWithSettings = qaQuestions.map(qa => {
-          const hasSettings = qa.outputSettings && Object.keys(qa.outputSettings).length > 0;
-          if (hasSettings) return qa;
-          const parentSession = qaSessions.find(session => session.eventId === qa.eventId);
-          const fromParent = parentSession?.outputSettings && Object.keys(parentSession.outputSettings).length > 0
-            ? parentSession.outputSettings
-            : null;
-          return { ...qa, outputSettings: fromParent || defaultOutputSettings };
-        });
-        const enrichedQasData = [...qaSessions, ...qaQuestionsWithSettings];
-        
-        const activeResult = findActiveContent(pollsData, enrichedQasData);
-        const currentActiveId = activeContent?.id;
+    // Real-time listeners - Firestore only pushes when data changes (no polling, minimal reads)
+    const unsubPolls = subscribePollsByEvent(eventId, (pollsData) => setPolls(pollsData));
+    const unsubQas = subscribeQAsByEvent(eventId, (qasData) => setQAs(qasData));
+    return () => {
+      unsubPolls();
+      unsubQas();
+    };
+  }, [eventId, outputNum]);
 
-        if (activeResult && activeResult.content.id !== currentActiveId) {
-          // New active content - animate out current, then in new with transition-in delay
-          setIsVisible(false);
-          setTimeout(() => {
-            setActiveContent(activeResult.content);
-            setContentType(activeResult.type);
-            setIsVisible(false);
-            const delayMs = getAnimationSettings().qaAnimateInDelayMs ?? 100;
-            afterDelayThenPaint(delayMs, () => setIsVisible(true));
-          }, 500);
-        } else if (!activeResult && activeContent) {
-          // No active content - animate out
-          if (isVisible) {
-            setIsVisible(false);
-            setTimeout(() => {
-              setActiveContent(null);
-            }, 500);
-          } else {
-            setActiveContent(null);
-          }
-        } else if (activeResult && activeResult.content.id === currentActiveId && activeContent) {
-          // Same content but data may have updated - update without animation
-          if (contentType === 'poll') {
-            const currentVotes = (activeContent as Poll).options.map(o => o.votes || 0).join(',');
-            const newVotes = (activeResult.content as Poll).options.map(o => o.votes || 0).join(',');
-          if (currentVotes !== newVotes) {
-              setActiveContent(activeResult.content);
-            }
-          } else if (contentType === 'qa') {
-            // For Q&A, check if question or answer changed
-            const currentQA = activeContent as QandA;
-            const newQA = activeResult.content as QandA;
-            if (currentQA.question !== newQA.question || currentQA.answer !== newQA.answer) {
-              setActiveContent(activeResult.content);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Error checking for active content:', err);
+  // When polls or qas change, recompute active content (from real-time listener)
+  useEffect(() => {
+    const defaultOutputSettings = { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
+    const qaSessions = qas.filter(qa => qa.name && !qa.question);
+    const qaQuestions = qas.filter(qa => qa.question && !qa.name);
+    const qaQuestionsWithSettings = qaQuestions.map(qa => {
+      const hasSettings = qa.outputSettings && Object.keys(qa.outputSettings).length > 0;
+      if (hasSettings) return qa;
+      const parentSession = qaSessions.find(session => session.eventId === qa.eventId);
+      const fromParent = parentSession?.outputSettings && Object.keys(parentSession.outputSettings).length > 0
+        ? parentSession.outputSettings
+        : null;
+      return { ...qa, outputSettings: fromParent || defaultOutputSettings };
+    });
+    const enrichedQasData = [...qaSessions, ...qaQuestionsWithSettings];
+    const activeResult = findActiveContentForOutput(polls, enrichedQasData);
+    const currentActiveId = activeContent?.id;
+
+    if (activeResult && activeResult.content.id !== currentActiveId) {
+      setIsVisible(false);
+      setTimeout(() => {
+        setActiveContent(activeResult.content);
+        setContentType(activeResult.type);
+        setIsVisible(false);
+        const delayMs = getAnimationSettings().qaAnimateInDelayMs ?? 100;
+        afterDelayThenPaint(delayMs, () => setIsVisible(true));
+      }, 500);
+    } else if (!activeResult && activeContent) {
+      if (isVisible) {
+        setIsVisible(false);
+        setTimeout(() => setActiveContent(null), 500);
+      } else {
+        setActiveContent(null);
       }
-    }, 1000); // Check every 1 second for real-time updates
-
-    return () => clearInterval(interval);
-  }, [eventId, outputNum, activeContent?.id, isVisible, contentType]);
+    } else if (activeResult && activeResult.content.id === currentActiveId && activeContent) {
+      if (contentType === 'poll') {
+        const currentVotes = (activeContent as Poll).options.map(o => o.votes || 0).join(',');
+        const newVotes = (activeResult.content as Poll).options.map(o => o.votes || 0).join(',');
+        if (currentVotes !== newVotes) setActiveContent(activeResult.content);
+      } else if (contentType === 'qa') {
+        const currentQA = activeContent as QandA;
+        const newQA = activeResult.content as QandA;
+        if (currentQA.question !== newQA.question || currentQA.answer !== newQA.answer) {
+          setActiveContent(activeResult.content);
+        }
+      }
+    }
+  }, [polls, qas, outputNum, activeContent?.id, isVisible, contentType]);
 
   if (loading) {
     return (

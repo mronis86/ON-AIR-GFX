@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAllEvents, getEvent, getPollsByEvent, getQAsByEvent, getLiveState, updatePoll, updateQA, setLiveState } from '../services/firestore';
+import { getAllEvents, getEvent, getPollsByEvent, getQAsByEvent, getLiveState, updatePoll, updateQA, setLiveState, subscribePollsByEvent, subscribeQAsByEvent } from '../services/firestore';
 import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
@@ -391,95 +391,48 @@ export default function OperatorsPage() {
     activeQA?.submitterName,
   ]);
 
-  // Refresh Q&A questions periodically to show updated Cue/Next status
+  // Subscribe to Q&A - updates only when data changes (no polling, fewer Firestore reads)
   useEffect(() => {
     if (!selectedEventId) return;
-    
-    const interval = setInterval(async () => {
-      try {
-        const eventQAs = await getQAsByEvent(selectedEventId);
-        const qaSessions = eventQAs.filter(qa => qa.name && !qa.question);
-        const qaSubmissions = eventQAs.filter(qa => qa.question && !qa.name);
-        
-        // Enrich Q&A questions with outputSettings from parent sessions if missing
-        const enrichedSubmissions = qaSubmissions.map(qa => {
-          if (!qa.outputSettings || Object.keys(qa.outputSettings).length === 0) {
-            const parentSession = qaSessions.find(session => 
-              session.eventId === qa.eventId && 
-              session.name && 
-              !session.question &&
-              session.outputSettings &&
-              Object.keys(session.outputSettings).length > 0
-            );
-            if (parentSession?.outputSettings) {
-              return { ...qa, outputSettings: parentSession.outputSettings };
-            }
+    const unsub = subscribeQAsByEvent(selectedEventId, (eventQAs) => {
+      const qaSessions = eventQAs.filter(qa => qa.name && !qa.question);
+      const qaSubmissions = eventQAs.filter(qa => qa.question && !qa.name);
+      const enrichedSubmissions = qaSubmissions.map(qa => {
+        if (!qa.outputSettings || Object.keys(qa.outputSettings || {}).length === 0) {
+          const parentSession = qaSessions.find(session =>
+            session.eventId === qa.eventId &&
+            session.name &&
+            !session.question &&
+            session.outputSettings &&
+            Object.keys(session.outputSettings).length > 0
+          );
+          if (parentSession?.outputSettings) {
+            return { ...qa, outputSettings: parentSession.outputSettings };
           }
-          return qa;
-        });
-        
-        // Check if something actually changed (to prevent unnecessary re-renders)
-        const currentIds = qaQuestions.map(q => q.id).sort().join(',');
-        const newIds = enrichedSubmissions.map(q => q.id).sort().join(',');
-        const listChanged = currentIds !== newIds;
-        
-        // Check if status changed (isQueued, isNext, isActive, isDone)
-        const statusChanged = qaQuestions.some(currentQ => {
-          const newQ = enrichedSubmissions.find(n => n.id === currentQ.id);
-          if (!newQ) return false;
-          return (
-            currentQ.isQueued !== newQ.isQueued ||
-            currentQ.isNext !== newQ.isNext ||
-            currentQ.isActive !== newQ.isActive ||
-            currentQ.isDone !== newQ.isDone
-          );
-        }) || enrichedSubmissions.some(newQ => {
-          const currentQ = qaQuestions.find(c => c.id === newQ.id);
-          if (!currentQ) return false;
-          return (
-            currentQ.isQueued !== newQ.isQueued ||
-            currentQ.isNext !== newQ.isNext ||
-            currentQ.isActive !== newQ.isActive ||
-            currentQ.isDone !== newQ.isDone
-          );
-        });
-        
-        // Update if list changed or status changed
-        if (listChanged || statusChanged) {
-          setQAQuestions(enrichedSubmissions);
         }
-      } catch (err) {
-        console.error('Error refreshing Q&A questions:', err);
-      }
-    }, 2000); // Refresh every 2 seconds to match moderation page
-    
-    return () => clearInterval(interval);
-  }, [selectedEventId, qas]);
+        return qa;
+      });
+      setQAs(qaSessions);
+      setQAQuestions(enrichedSubmissions);
+    });
+    return () => unsub();
+  }, [selectedEventId]);
 
-  // Real-time vote updates for active poll in preview
+  // Subscribe to polls - updates only when data changes (vote updates, etc.)
   useEffect(() => {
-    if (!selectedEventId || !activePoll) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const eventPolls = await getPollsByEvent(selectedEventId);
-        const updatedActivePoll = eventPolls.find((p) => p.isActive && p.id === activePoll.id);
-        if (updatedActivePoll) {
-          // Check if votes changed
-          const currentVotes = activePoll.options.map(o => o.votes || 0).join(',');
-          const newVotes = updatedActivePoll.options.map(o => o.votes || 0).join(',');
-          if (currentVotes !== newVotes) {
-            setActivePoll(updatedActivePoll);
-            // Also update the polls list
-            setPolls(eventPolls);
-          }
+    if (!selectedEventId) return;
+    const unsub = subscribePollsByEvent(selectedEventId, (eventPolls) => {
+      setPolls(eventPolls);
+      if (activePoll) {
+        const updated = eventPolls.find((p) => p.isActive && p.id === activePoll.id);
+        if (updated) {
+          const currentVotes = (activePoll.options || []).map(o => o.votes || 0).join(',');
+          const newVotes = (updated.options || []).map(o => o.votes || 0).join(',');
+          if (currentVotes !== newVotes) setActivePoll(updated);
         }
-      } catch (err) {
-        console.error('Error updating poll votes:', err);
       }
-    }, 1000); // Check every 1 second
-
-    return () => clearInterval(interval);
+    });
+    return () => unsub();
   }, [selectedEventId, activePoll?.id]);
 
   const loadEvents = async () => {

@@ -2,17 +2,19 @@
  * Live CSV server for Railway.
  * GET /live-qa-csv?eventId=xxx returns Q&A as CSV (6 columns).
  * GET /live-poll-csv?eventId=xxx returns Poll as CSV (title, options, votes).
- * Reads from Firestore. Set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT (JSON string) in Railway env.
- * Version: 2025-02-poll (includes /live-poll-csv endpoint)
- * Caches responses 15s to reduce Firestore reads and avoid quota exhaustion.
+ * Uses Firestore listeners - cache updates only when data changes (no TTL).
+ * vMix can poll every 1s; reads only occur when Firestore data changes.
+ * Set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT (JSON string) in Railway env.
  */
-const SERVER_VERSION = '2025-02-poll';
-const CACHE_TTL_MS = 15000; // 15 seconds - reduces Firestore quota usage
+const SERVER_VERSION = '2025-02-listeners';
 const express = require('express');
 const admin = require('firebase-admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Idle timeout: unsubscribe from event if no requests for this long
+const LISTENER_IDLE_MS = 30 * 60 * 1000; // 30 minutes
 
 let db = null;
 try {
@@ -35,20 +37,128 @@ function escapeCsv(s) {
   return /[,"\n\r]/.test(t) ? `"${t}"` : t;
 }
 
-// Simple in-memory cache to reduce Firestore reads (avoids RESOURCE_EXHAUSTED / quota exceeded)
+// In-memory cache: key -> { value, lastAccessed }
+// No TTL - only updated by Firestore listeners
 const cache = new Map();
+const eventListeners = new Map(); // eventId -> { unsubs, lastAccessed, data }
+
 function getCached(key) {
   const ent = cache.get(key);
   if (!ent) return null;
-  if (Date.now() > ent.expires) {
-    cache.delete(key);
-    return null;
-  }
   return ent.value;
 }
+
 function setCache(key, value) {
-  cache.set(key, { value, expires: Date.now() + CACHE_TTL_MS });
+  cache.set(key, { value, lastAccessed: Date.now() });
 }
+
+function buildQaCsv(liveData, qaDocs) {
+  const csvSourceSessionId = liveData?.csvSourceSessionId || null;
+  let active = null, cue = null, next = null;
+  if (csvSourceSessionId) {
+    const questions = qaDocs.filter((q) => q.question && !q.name && q.sessionId === csvSourceSessionId);
+    active = questions.find((q) => q.isActive) || null;
+    cue = questions.find((q) => q.isQueued) || null;
+    next = questions.find((q) => q.isNext) || null;
+  }
+  const row = [
+    escapeCsv(active?.question ?? ''),
+    escapeCsv(active?.submitterName ?? ''),
+    escapeCsv(cue?.question ?? ''),
+    escapeCsv(cue?.submitterName ?? ''),
+    escapeCsv(next?.question ?? ''),
+    escapeCsv(next?.submitterName ?? ''),
+  ].join(',');
+  const rows = ['Question ACTIVE,Name ACTIVE,Question Cue,Name Cue,Question Next,Name Next', row];
+  return '\uFEFF' + rows.join('\r\n');
+}
+
+function buildPollCsv(liveData, pollDocOrPolls) {
+  const csvSourcePollId = liveData?.csvSourcePollId || null;
+  const pollDoc = Array.isArray(pollDocOrPolls)
+    ? pollDocOrPolls.find((p) => p.id === csvSourcePollId)
+    : pollDocOrPolls;
+  if (!csvSourcePollId || !pollDoc) {
+    return '\uFEFFTitle\r\nOption,Votes,Percentage,PercentRounded';
+  }
+  const poll = { id: pollDoc.id, ...pollDoc };
+  if (poll.eventId !== liveData._eventId) {
+    return '\uFEFFTitle\r\nOption,Votes,Percentage,PercentRounded';
+  }
+  const title = escapeCsv(poll.title ?? '');
+  const opts = poll.options ?? [];
+  const totalVotes = opts.reduce((sum, o) => sum + (o.votes ?? 0), 0);
+  const optRows = opts.map((o) => {
+    const v = o.votes ?? 0;
+    const pct = totalVotes > 0 ? ((v / totalVotes) * 100).toFixed(1) + '%' : '0%';
+    const pctRounded = totalVotes > 0 ? Math.round((v / totalVotes) * 100) + '%' : '0%';
+    return [escapeCsv(o.text ?? ''), v, pct, pctRounded].join(',');
+  });
+  const rows = [title, 'Option,Votes,Percentage,PercentRounded', ...optRows];
+  return '\uFEFF' + rows.join('\r\n');
+}
+
+function rebuildAndCache(eventId, liveData, qaDocs, polls) {
+  liveData._eventId = eventId;
+  const qaCsv = buildQaCsv(liveData, qaDocs);
+  const pollCsv = buildPollCsv(liveData, polls);
+  setCache(`qa:${eventId}`, qaCsv);
+  setCache(`poll:${eventId}`, pollCsv);
+}
+
+function ensureListeners(eventId) {
+  if (!db) return;
+  let state = eventListeners.get(eventId);
+  if (state) {
+    state.lastAccessed = Date.now();
+    return;
+  }
+
+  const data = { liveData: {}, qaDocs: [], polls: [] };
+  state = {
+    unsubs: [],
+    lastAccessed: Date.now(),
+    data,
+  };
+  eventListeners.set(eventId, state);
+
+  const rebuild = () => {
+    rebuildAndCache(eventId, data.liveData, data.qaDocs, data.polls);
+  };
+
+  // Listen to liveState
+  const unsubLive = db.collection('liveState').doc(eventId).onSnapshot((snap) => {
+    data.liveData = snap.exists ? snap.data() : {};
+    rebuild();
+  }, (err) => console.error(`liveState listener error for ${eventId}:`, err?.message));
+
+  // Listen to qa for this event
+  const unsubQa = db.collection('qa').where('eventId', '==', eventId).onSnapshot((snap) => {
+    data.qaDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    rebuild();
+  }, (err) => console.error(`qa listener error for ${eventId}:`, err?.message));
+
+  // Listen to polls for this event
+  const unsubPolls = db.collection('polls').where('eventId', '==', eventId).onSnapshot((snap) => {
+    data.polls = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    rebuild();
+  }, (err) => console.error(`polls listener error for ${eventId}:`, err?.message));
+
+  state.unsubs = [unsubLive, unsubQa, unsubPolls];
+}
+
+function pruneIdleListeners() {
+  const now = Date.now();
+  for (const [eventId, state] of eventListeners.entries()) {
+    if (now - state.lastAccessed > LISTENER_IDLE_MS) {
+      state.unsubs.forEach((fn) => { try { fn(); } catch (e) {} });
+      eventListeners.delete(eventId);
+      cache.delete(`qa:${eventId}`);
+      cache.delete(`poll:${eventId}`);
+    }
+  }
+}
+setInterval(pruneIdleListeners, 5 * 60 * 1000); // Every 5 min
 
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
@@ -65,33 +175,24 @@ app.get('/live-qa-csv', async (req, res) => {
     res.status(400).set('Content-Type', 'text/plain').send('Missing eventId query parameter');
     return;
   }
+  ensureListeners(eventId);
+  const cached = getCached(`qa:${eventId}`);
+  if (cached) {
+    res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(cached);
+    return;
+  }
+  // First request before initial snapshot - fetch once to prime
   try {
     const liveSnap = await db.collection('liveState').doc(eventId).get();
     const liveData = liveSnap.exists ? liveSnap.data() : {};
     const csvSourceSessionId = liveData.csvSourceSessionId || null;
-
-    let active = null, cue = null, next = null;
+    let qaDocs = [];
     if (csvSourceSessionId) {
       const qaSnap = await db.collection('qa').where('eventId', '==', eventId).get();
-      const questions = qaSnap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((q) => q.question && !q.name && q.sessionId === csvSourceSessionId);
-      active = questions.find((q) => q.isActive) || null;
-      cue = questions.find((q) => q.isQueued) || null;
-      next = questions.find((q) => q.isNext) || null;
+      qaDocs = qaSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
-
-    const row = [
-      escapeCsv(active?.question ?? ''),
-      escapeCsv(active?.submitterName ?? ''),
-      escapeCsv(cue?.question ?? ''),
-      escapeCsv(cue?.submitterName ?? ''),
-      escapeCsv(next?.question ?? ''),
-      escapeCsv(next?.submitterName ?? ''),
-    ].join(',');
-    const rows = ['Question ACTIVE,Name ACTIVE,Question Cue,Name Cue,Question Next,Name Next', row];
-    const csv = '\uFEFF' + rows.join('\r\n');
-    setCache(cacheKey, csv);
+    const csv = buildQaCsv(liveData, qaDocs);
+    setCache(`qa:${eventId}`, csv);
     res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
   } catch (err) {
     res.status(500).set('Content-Type', 'text/plain').send(err?.message || 'Error');
@@ -108,52 +209,33 @@ app.get('/live-poll-csv', async (req, res) => {
     res.status(400).set('Content-Type', 'text/plain').send('Missing eventId query parameter');
     return;
   }
-  const cacheKey = `poll:${eventId}`;
-  const cached = getCached(cacheKey);
+  ensureListeners(eventId);
+  const cached = getCached(`poll:${eventId}`);
   if (cached) {
     res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(cached);
     return;
   }
+  // First request before initial snapshot - fetch once to prime
   try {
     const liveSnap = await db.collection('liveState').doc(eventId).get();
     const liveData = liveSnap.exists ? liveSnap.data() : {};
     const csvSourcePollId = liveData.csvSourcePollId || null;
-
     if (!csvSourcePollId) {
-      const rows = ['Title', 'Option,Votes,Percentage,PercentRounded'];
-      const csv = '\uFEFF' + rows.join('\r\n');
+      const csv = '\uFEFFTitle\r\nOption,Votes,Percentage,PercentRounded';
+      setCache(`poll:${eventId}`, csv);
       res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
       return;
     }
-
     const pollSnap = await db.collection('polls').doc(csvSourcePollId).get();
     if (!pollSnap.exists) {
-      const rows = ['Title', 'Option,Votes,Percentage,PercentRounded'];
-      const csv = '\uFEFF' + rows.join('\r\n');
+      const csv = '\uFEFFTitle\r\nOption,Votes,Percentage,PercentRounded';
+      setCache(`poll:${eventId}`, csv);
       res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
       return;
     }
-
     const poll = { id: pollSnap.id, ...pollSnap.data() };
-    if (poll.eventId !== eventId) {
-      const rows = ['Title', 'Option,Votes,Percentage,PercentRounded'];
-      const csv = '\uFEFF' + rows.join('\r\n');
-      res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
-      return;
-    }
-
-    const title = escapeCsv(poll.title ?? '');
-    const opts = poll.options ?? [];
-    const totalVotes = opts.reduce((sum, o) => sum + (o.votes ?? 0), 0);
-    const optRows = opts.map((o) => {
-      const v = o.votes ?? 0;
-      const pct = totalVotes > 0 ? ((v / totalVotes) * 100).toFixed(1) + '%' : '0%';
-      const pctRounded = totalVotes > 0 ? Math.round((v / totalVotes) * 100) + '%' : '0%';
-      return [escapeCsv(o.text ?? ''), v, pct, pctRounded].join(',');
-    });
-    const rows = [title, 'Option,Votes,Percentage,PercentRounded', ...optRows];
-    const csv = '\uFEFF' + rows.join('\r\n');
-    setCache(cacheKey, csv);
+    const csv = buildPollCsv({ ...liveData, _eventId: eventId }, [poll]);
+    setCache(`poll:${eventId}`, csv);
     res.status(200).set('Content-Type', 'text/csv; charset=utf-8').send(csv);
   } catch (err) {
     res.status(500).set('Content-Type', 'text/plain').send(err?.message || 'Error');
@@ -161,9 +243,9 @@ app.get('/live-poll-csv', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send(`Live CSV server v${SERVER_VERSION}. Use GET /live-qa-csv?eventId=YOUR_EVENT_ID or GET /live-poll-csv?eventId=YOUR_EVENT_ID`);
+  res.send(`Live CSV server v${SERVER_VERSION}. Uses Firestore listeners - cache updates on change. GET /live-qa-csv?eventId=X or /live-poll-csv?eventId=X`);
 });
 
 app.listen(PORT, () => {
-  console.log(`Live CSV server v${SERVER_VERSION} on port ${PORT} - routes: /live-qa-csv, /live-poll-csv`);
+  console.log(`Live CSV server v${SERVER_VERSION} on port ${PORT} - Firestore listeners, no TTL`);
 });

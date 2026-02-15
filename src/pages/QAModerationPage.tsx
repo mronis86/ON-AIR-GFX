@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getEvent, getQAsByEvent, getQAsByStatus, updateQA, createQA, deleteQA } from '../services/firestore';
+import { getEvent, getQAsByEvent, getQAsByStatus, updateQA, createQA, deleteQA, subscribeQAsByEvent } from '../services/firestore';
 import type { Event, QandA, QAStatus } from '../types';
 
 export default function QAModerationPage() {
@@ -26,88 +26,26 @@ export default function QAModerationPage() {
     loadData();
   }, [eventId, activeTab]);
 
-  // Auto-refresh questions for both tabs to detect state changes (Cue -> Active -> Done)
-  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const pendingQAsRef = useRef<QandA[]>([]);
-  const approvedQAsRef = useRef<QandA[]>([]);
-  
-  // Keep refs in sync with state
+  // Subscribe to Q&A - updates only when data changes (no polling, fewer Firestore reads)
   useEffect(() => {
-    pendingQAsRef.current = pendingQAs;
-  }, [pendingQAs]);
-  
-  useEffect(() => {
-    approvedQAsRef.current = approvedQAs;
-  }, [approvedQAs]);
-  
-  useEffect(() => {
-    if (eventId) {
-      // Refresh every 2 seconds to detect state changes (Cue -> Active -> Done) for both tabs
-      refreshIntervalRef.current = setInterval(async () => {
-        try {
-          const allQAs = await getQAsByEvent(eventId);
-          const submissions = allQAs.filter(qa => qa.question && !qa.name);
-          const allSorted = submissions.sort((a, b) => 
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-          
-          // Check for changes in pending list (including isQueued, isActive, isDone)
-          const currentPending = pendingQAsRef.current;
-          const hasPendingChanges = allSorted.some(newQ => {
-            const oldQ = currentPending.find(old => old.id === newQ.id);
-            if (!oldQ) return true; // New question
-            return (
-              oldQ.status !== newQ.status ||
-              oldQ.isActive !== newQ.isActive ||
-              oldQ.isNext !== newQ.isNext ||
-              oldQ.isQueued !== newQ.isQueued ||
-              oldQ.isDone !== newQ.isDone
-            );
-          });
-          
-          // Check for changes in approved list
-          const approved = submissions.filter(qa => qa.status === 'approved');
-          const approvedSorted = approved.sort((a, b) => {
-            // Queued questions first
-            if (a.isQueued && !b.isQueued) return -1;
-            if (!a.isQueued && b.isQueued) return 1;
-            // Then by date
-            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          });
-          
-          const currentApproved = approvedQAsRef.current;
-          const hasApprovedChanges = approvedSorted.some(newQ => {
-            const oldQ = currentApproved.find(old => old.id === newQ.id);
-            if (!oldQ) return true; // New question
-            return (
-              oldQ.status !== newQ.status ||
-              oldQ.isActive !== newQ.isActive ||
-              oldQ.isNext !== newQ.isNext ||
-              oldQ.isQueued !== newQ.isQueued ||
-              oldQ.isDone !== newQ.isDone
-            );
-          });
-          
-          // Update pending list if there are changes
-          if (hasPendingChanges) {
-            setPendingQAs(allSorted);
-          }
-          
-          // Update approved list if there are changes
-          if (hasApprovedChanges) {
-            setApprovedQAs(approvedSorted);
-          }
-        } catch (err) {
-          console.error('Error refreshing questions:', err);
-        }
-      }, 2000); // Check every 2 seconds
-      
-      return () => {
-        if (refreshIntervalRef.current) {
-          clearInterval(refreshIntervalRef.current);
-        }
-      };
-    }
+    if (!eventId) return;
+    const unsub = subscribeQAsByEvent(eventId, (allQAs) => {
+      const submissions = allQAs.filter(qa => qa.question && !qa.name);
+      const sessionList = allQAs.filter(qa => qa.name && !qa.question);
+      const allSorted = submissions.sort((a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      const approved = submissions.filter(qa => qa.status === 'approved');
+      const approvedSorted = approved.sort((a, b) => {
+        if (a.isQueued && !b.isQueued) return -1;
+        if (!a.isQueued && b.isQueued) return 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      setSessions(sessionList);
+      setPendingQAs(allSorted);
+      setApprovedQAs(approvedSorted);
+    });
+    return () => unsub();
   }, [eventId]);
 
   const loadData = async () => {
