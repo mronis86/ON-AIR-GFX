@@ -265,26 +265,40 @@ app.post('/sheet-write', async (req, res) => {
     return;
   }
   try {
-    const out = await fetch(String(url), {
+    let out = await fetch(String(url), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      redirect: 'manual', // do not follow redirects (Google often redirects POST to login when not "Anyone")
+      redirect: 'manual',
     });
-    const text = await out.text();
+    let text = await out.text();
 
-    // If Google redirected, they're sending POST to a login/consent page — return clear JSON for the app
+    // Google Apps Script "Anyone" deployments often redirect once to script.googleusercontent.com (echo URL). Follow that; only treat accounts.google.com as login.
     if (out.status >= 300 && out.status < 400) {
       const location = out.headers.get('location') || '';
-      console.warn('sheet-write: Google redirected POST', out.status, location?.slice(0, 80));
-      res.status(200).set('Content-Type', 'application/json').send(JSON.stringify({
-        ok: false,
-        error: "Google redirected the request (login/consent). Use the deployment URL that ends with /exec and has Who has access: Anyone. Create a New version and Deploy after changing access.",
-        redirected: true,
-        status: out.status,
-        redirectLocation: location ? location.slice(0, 120) : undefined,
-      }));
-      return;
+      if (location.includes('script.googleusercontent.com')) {
+        // Normal Apps Script proxy redirect — echo URL returns result for GET (forward cookies so Google accepts)
+        const redirectUrl = location.startsWith('http') ? location : new URL(location, url).href;
+        const setCookie = out.headers.get('set-cookie') || out.headers.get('Set-Cookie');
+        const headers = {};
+        if (setCookie) headers['Cookie'] = setCookie;
+        out = await fetch(redirectUrl, { method: 'GET', redirect: 'manual', headers });
+        text = await out.text();
+      }
+      if (out.status >= 300 && out.status < 400) {
+        const loc2 = out.headers.get('location') || '';
+        if (loc2.includes('accounts.google.com')) {
+          console.warn('sheet-write: Google redirected to login', out.status, loc2?.slice(0, 80));
+          res.status(200).set('Content-Type', 'application/json').send(JSON.stringify({
+            ok: false,
+            error: "Google redirected to login. Use the deployment URL that ends with /exec and has Who has access: Anyone. Create a New version and Deploy.",
+            redirected: true,
+            status: out.status,
+            redirectLocation: loc2 ? loc2.slice(0, 120) : undefined,
+          }));
+          return;
+        }
+      }
     }
 
     // Log a short preview for debugging (Railway logs)
