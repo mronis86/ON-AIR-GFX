@@ -167,8 +167,14 @@ function pruneIdleListeners() {
 }
 setInterval(pruneIdleListeners, 5 * 60 * 1000); // Every 5 min
 
+// CORS: allow browser requests from any origin (e.g. Firebase Hosting app)
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
   next();
 });
 
@@ -250,6 +256,7 @@ app.get('/live-poll-csv', async (req, res) => {
 });
 
 // Proxy POST to Google Apps Script Web App (avoids CORS when app calls from browser)
+// OPTIONS is handled above by CORS middleware so browser preflight succeeds.
 // redirect: 'manual' so we don't follow Google's redirect to login page (which would return HTML)
 app.post('/sheet-write', async (req, res) => {
   const { url, body } = req.body || {};
