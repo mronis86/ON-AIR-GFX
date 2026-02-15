@@ -94,7 +94,7 @@ export default function EventDetailPage() {
         setQaBackupSheetNames(eventData.qaBackupSheetNames || {});
         setPollBackupSheetName(eventData.pollBackupSheetName || '');
         setPollBackupSheetNames(eventData.pollBackupSheetNames || {});
-        setRailwayBaseUrl(eventData.railwayLiveCsvBaseUrl || DEFAULT_RAILWAY_BASE_URL);
+        setRailwayBaseUrl(ensureRailwayBaseUrlHasHttps(eventData.railwayLiveCsvBaseUrl || '') || DEFAULT_RAILWAY_BASE_URL);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load event data');
@@ -448,7 +448,7 @@ export default function EventDetailPage() {
                       setQaBackupSheetNames(event.qaBackupSheetNames || {});
                       setPollBackupSheetName(event.pollBackupSheetName || '');
                       setPollBackupSheetNames(event.pollBackupSheetNames || {});
-                      setRailwayBaseUrl(event.railwayLiveCsvBaseUrl || DEFAULT_RAILWAY_BASE_URL);
+                      setRailwayBaseUrl(ensureRailwayBaseUrlHasHttps(event.railwayLiveCsvBaseUrl || '') || DEFAULT_RAILWAY_BASE_URL);
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                   >
@@ -513,6 +513,9 @@ export default function EventDetailPage() {
                                   if (json && json.ok === false && json.error) {
                                     resultOk = false;
                                     resultError = json.error;
+                                    if (json.redirected && json.redirectLocation) {
+                                      resultError += ` Redirected to: ${json.redirectLocation}`;
+                                    }
                                   } else if (json && json.message) {
                                     resultMessage = json.message;
                                   } else if (json && json.sheetName && json.row) {
@@ -537,7 +540,9 @@ export default function EventDetailPage() {
                               }
                             } catch (err) {
                               const msg = err instanceof Error ? err.message : String(err);
-                              setTestWriteResult(`Error: ${msg}. Set Railway URL below so the app can reach the Web App.`);
+                              const proxyBase = getRailwayBaseUrlForSheet(railwayBaseUrl);
+                              const triedUrl = `${proxyBase.replace(/\/+$/, '')}/sheet-write`;
+                              setTestWriteResult(`Error: ${msg}. Tried: ${triedUrl} — check Railway is up and the URL is correct (use https://).`);
                             } finally {
                               setTestWriteLoading(false);
                             }

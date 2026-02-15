@@ -279,9 +279,10 @@ app.post('/sheet-write', async (req, res) => {
       console.warn('sheet-write: Google redirected POST', out.status, location?.slice(0, 80));
       res.status(200).set('Content-Type', 'application/json').send(JSON.stringify({
         ok: false,
-        error: "Google redirected the request (login/consent). In Apps Script: Deploy → Manage deployments → Edit → Who has access: 'Anyone' → Version: New version → Deploy. Use the Web App URL that ends with /exec (not /dev).",
+        error: "Google redirected the request (login/consent). Use the deployment URL that ends with /exec and has Who has access: Anyone. Create a New version and Deploy after changing access.",
         redirected: true,
         status: out.status,
+        redirectLocation: location ? location.slice(0, 120) : undefined,
       }));
       return;
     }
