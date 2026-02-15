@@ -11,6 +11,10 @@ export interface Event {
   activeQASheetName?: string;
   /** Cell for active Q&A (e.g. "A1") — active question/answer update this cell */
   activeQACell?: string;
+  /** Optional: sub-sheet to append all Q&A submissions (backup). One row per submission. */
+  qaBackupSheetName?: string;
+  /** Optional: sub-sheet to append poll snapshots when a poll is played (backup). One row per snapshot. */
+  pollBackupSheetName?: string;
   /** Base URL of Railway live-csv server (e.g. https://xxx.up.railway.app) for IMPORTDATA formula */
   railwayLiveCsvBaseUrl?: string;
   publicLink?: string; // Public link for event submissions
@@ -67,7 +71,7 @@ export interface Poll {
   titleSize?: 'small' | 'medium' | 'large'; // Title size (default: 'large')
   // Per-layout title settings (independent for each layout type)
   titleSettings?: {
-    fullScreen?: { fontSize?: number; yPosition?: number; justification?: 'left' | 'center' | 'right' }; // Font size in px, Y position in px (positive = down, negative = up), horizontal justification
+    fullScreen?: { fontSize?: number; yPosition?: number; justification?: 'left' | 'center' | 'right'; contentYPosition?: number }; // contentYPosition = where bars/content start (px, positive = down)
     lowerThird?: { fontSize?: number; yPosition?: number; justification?: 'left' | 'center' | 'right' };
     pip?: { fontSize?: number; yPosition?: number; justification?: 'left' | 'center' | 'right' };
   };

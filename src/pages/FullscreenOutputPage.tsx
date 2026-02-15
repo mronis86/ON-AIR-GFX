@@ -4,7 +4,7 @@ import { getEvent, getPollsByEvent, getQAsByEvent, getQAsByStatus, subscribePoll
 import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
-import { getAnimationSettings, getAnimationClasses, getTransitionInClass, getTransitionOutClass, afterDelayThenPaint } from '../utils/animations';
+import { getAnimationSettings, getTransitionInClass, getTransitionOutClass, afterDelayThenPaint, ANIMATION_DURATION_MS } from '../utils/animations';
 import { QAStatus } from '../types';
 
 // Base dimensions for consistent scaling
@@ -25,6 +25,9 @@ export default function FullscreenOutputPage() {
   const [isVisible, setIsVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const lastLoadedEventOutput = useRef<{ eventId: string; outputNum: number } | null>(null);
+  const isAnimatingOutRef = useRef(false);
+  const contentChangeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isContentAnimatingOut, setIsContentAnimatingOut] = useState(false);
 
   // Animation settings from localStorage
   const [animationSettings, setAnimationSettings] = useState(getAnimationSettings());
@@ -32,7 +35,9 @@ export default function FullscreenOutputPage() {
   // Parse output number: layoutFilter is now the output number (1-4)
   const outputNum = layoutFilter ? parseInt(layoutFilter, 10) : 1;
 
-  // Shared helper: find active content for this output (polls take priority over Q&As)
+  // Shared helper: find active content for this output (polls take priority over Q&As).
+  // For each output number, use the first matching layout type so each layout works on its own:
+  // Full Screen → Lower Third → PIP → Split. Assign an output to exactly one (or one primary) layout type.
   const findActiveContentForOutput = (pollsData: Poll[], qasData: QandA[]) => {
     const activePoll = pollsData.find((p) => {
       if (!p.isActive) return false;
@@ -130,8 +135,8 @@ export default function FullscreenOutputPage() {
         setPolls(pollsData);
         setQAs(qasData);
         
-        // For Q&A questions without outputSettings, copy from parent session or use default so active Q&A is always findable
-        const defaultOutputSettings = { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
+        // For Q&A questions without outputSettings: show on all 4 outputs as full screen so each output works
+        const defaultOutputSettings = { fullScreen: [1, 2, 3, 4] };
         const qaSessions = qasData.filter(qa => qa.name && !qa.question);
         const qaQuestions = qasData.filter(qa => qa.question && !qa.name);
         const qaQuestionsWithSettings = qaQuestions.map(qa => {
@@ -178,7 +183,7 @@ export default function FullscreenOutputPage() {
 
   // When polls or qas change, recompute active content (from real-time listener)
   useEffect(() => {
-    const defaultOutputSettings = { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
+    const defaultOutputSettings = { fullScreen: [1, 2, 3, 4] };
     const qaSessions = qas.filter(qa => qa.name && !qa.question);
     const qaQuestions = qas.filter(qa => qa.question && !qa.name);
     const qaQuestionsWithSettings = qaQuestions.map(qa => {
@@ -193,21 +198,62 @@ export default function FullscreenOutputPage() {
     const enrichedQasData = [...qaSessions, ...qaQuestionsWithSettings];
     const activeResult = findActiveContentForOutput(polls, enrichedQasData);
     const currentActiveId = activeContent?.id;
+    const hasNoPreviousContent = activeContent === null;
 
-    if (activeResult && activeResult.content.id !== currentActiveId) {
+    // Play (first show): no previous content - just set content and animate IN
+    if (activeResult && hasNoPreviousContent) {
+      setActiveContent(activeResult.content);
+      setContentType(activeResult.type);
       setIsVisible(false);
-      setTimeout(() => {
+      const delayMs = getAnimationSettings().qaAnimateInDelayMs ?? 100;
+      afterDelayThenPaint(delayMs, () => setIsVisible(true));
+      return;
+    }
+
+    // Content swap: animate OUT immediately, wait for out duration, then swap and animate IN
+    if (activeResult && activeResult.content.id !== currentActiveId && !hasNoPreviousContent) {
+      if (isAnimatingOutRef.current) return;
+      if (contentChangeTimeoutRef.current) clearTimeout(contentChangeTimeoutRef.current);
+      const settings = getAnimationSettings();
+      const hardCut = settings.useHardCut === true;
+      isAnimatingOutRef.current = true;
+      setIsContentAnimatingOut(true);
+      setTimeout(() => requestAnimationFrame(() => setIsVisible(false)), 0);
+      const outDurationMs = hardCut ? 50 : ANIMATION_DURATION_MS;
+      contentChangeTimeoutRef.current = setTimeout(() => {
+        contentChangeTimeoutRef.current = null;
+        setIsContentAnimatingOut(false);
         setActiveContent(activeResult.content);
         setContentType(activeResult.type);
         setIsVisible(false);
-        const delayMs = getAnimationSettings().qaAnimateInDelayMs ?? 100;
-        afterDelayThenPaint(delayMs, () => setIsVisible(true));
-      }, 500);
-    } else if (!activeResult && activeContent) {
+        afterDelayThenPaint(settings.qaAnimateInDelayMs ?? 100, () => {
+          setIsVisible(true);
+          isAnimatingOutRef.current = false;
+        });
+      }, outDurationMs);
+      return;
+    }
+
+    // Stop: animate OUT immediately, then clear
+    if (!activeResult && activeContent) {
       if (isVisible) {
-        setIsVisible(false);
-        setTimeout(() => setActiveContent(null), 500);
-      } else {
+        if (isAnimatingOutRef.current) return;
+        if (contentChangeTimeoutRef.current) clearTimeout(contentChangeTimeoutRef.current);
+        const settings = getAnimationSettings();
+        const hardCut = settings.useHardCut === true;
+        isAnimatingOutRef.current = true;
+        setIsContentAnimatingOut(true);
+        setTimeout(() => requestAnimationFrame(() => setIsVisible(false)), 0);
+        const outDurationMs = hardCut ? 50 : ANIMATION_DURATION_MS;
+        contentChangeTimeoutRef.current = setTimeout(() => {
+          contentChangeTimeoutRef.current = null;
+          setIsContentAnimatingOut(false);
+          setActiveContent(null);
+          isAnimatingOutRef.current = false;
+        }, outDurationMs);
+        return;
+      }
+      if (!isAnimatingOutRef.current) {
         setActiveContent(null);
       }
     } else if (activeResult && activeResult.content.id === currentActiveId && activeContent) {
@@ -511,6 +557,13 @@ export default function FullscreenOutputPage() {
     ? (activeContent as Poll).primaryColor || '#3B82F6'
     : (activeContent as QandA).primaryColor || '#3B82F6';
 
+  // Global animation classes - same for all layouts. Fade with slide only when checkboxes are set.
+  const hardCut = animationSettings.useHardCut === true;
+  const contentAnimationClass = isVisible
+    ? getTransitionInClass(animationSettings.animationInType, hardCut, animationSettings.fadeInWithSlide ?? true)
+    : (isContentAnimatingOut ? getTransitionOutClass(animationSettings.animationOutType, hardCut, animationSettings.fadeOutWithSlide ?? true) : 'opacity-0');
+  const showBackground = isVisible || isContentAnimatingOut;
+
   // Render content based on type
   const renderContent = () => {
     if (contentType === 'poll') {
@@ -540,15 +593,9 @@ export default function FullscreenOutputPage() {
             marginTop: `-${BASE_HEIGHT / 2}px`,
           }}
         >
-          {/* Background layer - animates first if enabled */}
+          {/* Background layer */}
           <div
-            className={`absolute inset-0 transition-all duration-500 ${
-              animationSettings.backgroundAnimateFirst && isVisible
-                ? 'opacity-100'
-                : !animationSettings.backgroundAnimateFirst
-                ? (isVisible ? 'opacity-100' : 'opacity-0')
-                : 'opacity-0'
-            }`}
+            className={`absolute inset-0 transition-all duration-500 ${showBackground ? 'opacity-100' : 'opacity-0'}`}
             style={{
               width: `${BASE_WIDTH}px`,
               height: `${BASE_HEIGHT}px`,
@@ -563,42 +610,48 @@ export default function FullscreenOutputPage() {
               } : {}),
             }}
           />
-          {/* Content layer: in/out both use keyframe animations for smooth transitions */}
+          {/* Content layer - animation on outer div; inner wrapper fills canvas so poll bars span full width */}
           <div
-            className={`absolute inset-0 flex items-center justify-center hide-scrollbar ${
-              isVisible ? getTransitionInClass(animationSettings.animationInType) : getTransitionOutClass(animationSettings.animationOutType)
-            }`}
+            className={`absolute inset-0 hide-scrollbar ${contentAnimationClass}`}
             style={{
               width: `${BASE_WIDTH}px`,
               height: `${BASE_HEIGHT}px`,
               zIndex: 1,
               background: 'transparent',
-              transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-              ...(isVisible ? (() => {
-                if (contentType === 'poll') {
-                  const poll = activeContent as Poll;
-                  const zoom = poll.borderSettings?.fullScreen?.zoom;
-                  if (zoom && zoom !== 100) {
-                    return {
-                      transform: `scale(${zoom / 100})`,
-                      transformOrigin: 'center center',
-                    };
-                  }
-                } else if (contentType === 'qa') {
-                  const qa = activeContent as QandA;
-                  const zoom = qa.borderSettings?.fullScreen?.zoom;
-                  if (zoom && zoom !== 100) {
-                    return {
-                      transform: `scale(${zoom / 100})`,
-                      transformOrigin: 'center center',
-                    };
-                  }
-                }
-                return {};
-              })() : {}),
             }}
           >
-            {renderContent()}
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                ...(contentType === 'poll'
+                  ? (() => {
+                      const poll = activeContent as Poll;
+                      const zoom = poll.borderSettings?.fullScreen?.zoom;
+                      if (zoom && zoom !== 100) {
+                        return { transform: `scale(${zoom / 100})`, transformOrigin: 'center center' };
+                      }
+                      return {};
+                    })()
+                  : contentType === 'qa'
+                  ? (() => {
+                      const qa = activeContent as QandA;
+                      const zoom = qa.borderSettings?.fullScreen?.zoom;
+                      if (zoom && zoom !== 100) {
+                        return { transform: `scale(${zoom / 100})`, transformOrigin: 'center center' };
+                      }
+                      return {};
+                    })()
+                  : {}),
+              }}
+            >
+              <div style={{ width: '100%', height: '100%', minWidth: 0 }}>
+                {renderContent()}
+              </div>
+            </div>
           </div>
             </div>
           ) : layoutStyle === 2 ? (
@@ -629,11 +682,11 @@ export default function FullscreenOutputPage() {
                 marginTop: `-${BASE_HEIGHT / 2}px`,
               }}
             >
-              {/* Event page: relative bg-black rounded-lg overflow-hidden 960x540 */}
-              <div className="rounded-lg overflow-hidden" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000' }}>
-                {/* Event page: absolute bottom-0 left-0 right-0 - NO fixed height, sizes to content */}
+              {/* Event page: relative bg-black rounded-lg 960x540 - parent clips animated child */}
+              <div className="rounded-lg" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000', overflow: 'hidden' }}>
+                {/* Lower Third: whole box (border + content) animates; zoom on inner to avoid transform conflict */}
                 <div
-                  className={`${animationSettings.backgroundAnimateFirst && isVisible ? '' : !animationSettings.backgroundAnimateFirst ? (isVisible ? '' : 'opacity-0') : 'opacity-0'} ${isVisible ? getTransitionInClass(animationSettings.animationInType) : getTransitionOutClass(animationSettings.animationOutType)}`}
+                  className={contentAnimationClass}
                   style={{
                     position: 'absolute',
                     bottom: 0,
@@ -646,15 +699,15 @@ export default function FullscreenOutputPage() {
                     marginBottom: `${-yPosition}px`,
                     ...(contentType === 'poll' && (activeContent as Poll).borderRadius ? { borderRadius: `${(activeContent as Poll).borderRadius}px` } : {}),
                     ...(contentType === 'qa' && (activeContent as QandA).borderRadius ? { borderRadius: `${(activeContent as QandA).borderRadius}px` } : {}),
-                    ...(shouldZoom ? { transform: `scale(${zoomScale})`, transformOrigin: 'center center' } : {}),
-                    transition: 'opacity 500ms',
-                    transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
                   }}
                 >
-                  {/* Event page: div with p-6 (24px padding) */}
-                  <div style={{ padding: '24px' }}>
-                    {renderContent()}
-                  </div>
+                  {shouldZoom ? (
+                    <div style={{ transform: `scale(${zoomScale})`, transformOrigin: 'center center' }}>
+                      <div style={{ padding: '24px' }}>{renderContent()}</div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '24px' }}>{renderContent()}</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -680,7 +733,6 @@ export default function FullscreenOutputPage() {
           }
           const pipZoomScale = pipZoom / 100;
           const shouldPipZoom = pipZoom !== 100;
-          const pipOutType = pipSide ? (animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType) : (animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType);
 
           // Event page: top: 24+yPosition, left: 24+xPosition (or right: 24-xPosition)
           const topStyle = `${24 + pipY}px`;
@@ -690,17 +742,15 @@ export default function FullscreenOutputPage() {
           const pipBoxStyle: React.CSSProperties = {
             position: 'absolute' as const,
             top: topStyle,
-            width: '384px', // w-96 - matches Event page
-            maxWidth: '35vw', // matches Event page max-w-[35vw] - keeps layout consistent when viewport changes
-            maxHeight: '70vh', // matches Event page exactly - same space/layout format
-            overflowY: 'auto' as const,
+            width: '384px',
+            maxWidth: '35vw',
+            maxHeight: '70vh',
             ...(pipSide ? { left: leftStyle } : { right: rightStyle }),
             ...(Object.keys(layoutBgStyle).length > 0 ? layoutBgStyle : { background: 'rgba(0,0,0,0.95)' }),
             backdropFilter: 'blur(8px)',
             ...(contentType === 'poll'
               ? ((activeContent as Poll).borderSettings?.pip?.thickness === 0 ? {} : { border: `2px solid ${primaryColor}`, borderRadius: (activeContent as Poll).borderRadius ? `${(activeContent as Poll).borderRadius}px` : '12px' })
               : { borderRadius: (activeContent as QandA).borderRadius ? `${(activeContent as QandA).borderRadius}px` : '0' }),
-            ...(shouldPipZoom ? { transform: `scale(${pipZoomScale})`, transformOrigin: pipSide ? 'left top' : 'right top' } : {}),
           };
 
           return (
@@ -718,29 +768,23 @@ export default function FullscreenOutputPage() {
                 marginTop: `-${BASE_HEIGHT / 2}px`,
               }}
             >
-              {/* Event page: relative bg-black rounded-lg overflow-hidden 960x540 */}
-              <div className="rounded-lg overflow-hidden" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000' }}>
-                {/* Event page: absolute w-96 left-6 or right-6, top 24px, p-4 child */}
-                <div
-                  className={`${animationSettings.backgroundAnimateFirst && isVisible ? '' : !animationSettings.backgroundAnimateFirst ? (isVisible ? '' : 'opacity-0') : 'opacity-0'} ${isVisible ? getTransitionInClass(animationSettings.animationInType) : getTransitionOutClass(pipOutType)}`}
-                  style={{
-                    ...pipBoxStyle,
-                    zIndex: 1,
-                    transition: 'opacity 500ms',
-                    transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-                  }}
-                >
-                  {/* Event page: div with p-4 (16px padding) */}
-                  <div style={{ padding: contentType === 'poll' ? '16px' : '32px' }}>
-                    {renderContent()}
-                  </div>
+              <div className="rounded-lg" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000', overflow: 'hidden' }}>
+                {/* PIP: whole box (border + content) animates; zoom on inner to avoid transform conflict */}
+                <div className={contentAnimationClass} style={{ ...pipBoxStyle, zIndex: 1, overflow: 'hidden' }}>
+                  {shouldPipZoom ? (
+                    <div style={{ transform: `scale(${pipZoomScale})`, transformOrigin: pipSide ? 'left top' : 'right top' }}>
+                      <div style={{ padding: contentType === 'poll' ? '16px' : '32px' }}>{renderContent()}</div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: contentType === 'poll' ? '16px' : '32px' }}>{renderContent()}</div>
+                  )}
                 </div>
               </div>
             </div>
           );
         })()
       ) : (
-        /* Layout 4: Split Screen - Left/Right split (for Q&A only) */
+        /* Layout 4: Split Screen - Q&A only; same 960x540 canvas, panel on left or right */
         (() => {
           if (contentType !== 'qa') return null; // Only for Q&A
           
@@ -754,70 +798,53 @@ export default function FullscreenOutputPage() {
           const xPosition = (splitScreenBorderSetting as any)?.xPosition !== undefined && (splitScreenBorderSetting as any).xPosition !== null ? (splitScreenBorderSetting as any).xPosition : 0;
           const yPosition = (splitScreenBorderSetting as any)?.yPosition !== undefined && (splitScreenBorderSetting as any).yPosition !== null ? (splitScreenBorderSetting as any).yPosition : 0;
           
-          // Split screen width: 1/3 or 1/2 of screen
+          // Split panel width: 1/3 or 1/2 of base canvas
           const splitWidth = splitScreenWidth === 'half' ? BASE_WIDTH / 2 : BASE_WIDTH / 3;
           
           return (
             <div
-              className="relative w-full h-full hide-scrollbar"
               style={{
-                width: `${splitWidth}px`,
+                width: `${BASE_WIDTH}px`,
                 height: `${BASE_HEIGHT}px`,
-                transform: shouldZoom ? `scale(${scaleFactor * zoomScale})` : `scale(${scaleFactor})`,
-                transformOrigin: splitScreenSide === 'left' ? 'left center' : 'right center',
+                transform: `scale(${scaleFactor})`,
+                transformOrigin: 'center center',
                 overflow: 'hidden',
                 position: 'absolute',
+                left: '50%',
                 top: '50%',
-                ...(splitScreenSide === 'left' ? { left: `${xPosition}px` } : { right: `${xPosition}px` }),
+                marginLeft: `-${BASE_WIDTH / 2}px`,
                 marginTop: `-${BASE_HEIGHT / 2}px`,
-                ...(yPosition !== 0 ? { marginTop: `-${BASE_HEIGHT / 2 + yPosition}px` } : {}),
               }}
             >
-          {/* Background layer */}
-          <div
-            className={`absolute inset-0 transition-all duration-500 ${
-              animationSettings.backgroundAnimateFirst && isVisible
-                ? 'opacity-100'
-                : !animationSettings.backgroundAnimateFirst
-                ? (isVisible ? 'opacity-100' : 'opacity-0')
-                : 'opacity-0'
-            }`}
-            style={{
-              width: `${splitWidth}px`,
-              height: `${BASE_HEIGHT}px`,
-              zIndex: 0,
-              ...(Object.keys(layoutBgStyle).length > 0
-                ? layoutBgStyle
-                : {
-                    background: 'rgba(0,0,0,0.95)',
-                  }),
-              ...layoutBorderStyle,
-              backdropFilter: 'blur(8px)',
-              borderRadius: qa.borderRadius ? `${qa.borderRadius}px` : '0',
-            }}
-          />
-          {/* Content layer: in/out both use keyframe animations */}
-          {(() => {
-            const splitOutType = splitScreenSide === 'left' ? (animationSettings.animationOutType === 'slideLeft' ? 'slideLeft' : animationSettings.animationOutType) : (animationSettings.animationOutType === 'slideRight' ? 'slideRight' : animationSettings.animationOutType);
-            return (
-          <div
-            className={`absolute inset-0 hide-scrollbar ${
-              isVisible ? getTransitionInClass(animationSettings.animationInType) : getTransitionOutClass(splitOutType)
-            }`}
-            style={{
-              width: `${splitWidth}px`,
-              height: `${BASE_HEIGHT}px`,
-              zIndex: 1,
-              background: 'transparent',
-              transitionDelay: animationSettings.backgroundAnimateFirst && isVisible ? '300ms' : '0ms',
-              padding: '32px',
-            }}
-          >
-            {renderContent()}
-          </div>
-            );
-          })()}
-        </div>
+              <div className="rounded-lg" style={{ position: 'relative', width: `${BASE_WIDTH}px`, height: `${BASE_HEIGHT}px`, background: '#000', overflow: 'hidden' }}>
+                {/* Split panel: positioned left or right inside 960x540 */}
+                <div
+                  className={contentAnimationClass}
+                  style={{
+                    position: 'absolute',
+                    top: yPosition,
+                    bottom: 0,
+                    width: `${splitWidth}px`,
+                    ...(splitScreenSide === 'left' ? { left: xPosition } : { right: xPosition }),
+                    zIndex: 1,
+                    ...(Object.keys(layoutBgStyle).length > 0 ? layoutBgStyle : { background: 'rgba(0,0,0,0.95)' }),
+                    ...layoutBorderStyle,
+                    backdropFilter: 'blur(8px)',
+                    borderRadius: qa.borderRadius ? `${qa.borderRadius}px` : '0',
+                    padding: '32px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {shouldZoom ? (
+                    <div style={{ transform: `scale(${zoomScale})`, transformOrigin: splitScreenSide === 'left' ? 'left top' : 'right top' }}>
+                      {renderContent()}
+                    </div>
+                  ) : (
+                    renderContent()
+                  )}
+                </div>
+              </div>
+            </div>
           );
         })()
       )}

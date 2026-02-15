@@ -53,6 +53,50 @@ function doPost(e) {
       qaSheet.getRange(data.cell).setValue(text);
       return jsonResponse(200, { ok: true });
     }
+
+    // Append one Q&A submission to a backup sheet (one row per submission)
+    if (data.type === 'qa_backup' && data.sheetName && data.data) {
+      var backupSheet = getOrCreateSheet(ss, data.sheetName);
+      var d = data.data;
+      if (backupSheet.getLastRow() === 0) {
+        backupSheet.getRange(1, 1, 1, 6).setValues([['Timestamp', 'Session ID', 'Question', 'Submitter', 'Email', 'Status']]);
+        backupSheet.getRange(1, 1, 1, 6).setFontWeight('bold');
+      }
+      var nextRow = backupSheet.getLastRow() + 1;
+      backupSheet.getRange(nextRow, 1, nextRow, 6).setValues([[
+        d.timestamp || new Date().toISOString(),
+        d.sessionId || '',
+        (d.question || '').toString().slice(0, 50000),
+        (d.submitterName || '').toString(),
+        (d.submitterEmail || '').toString(),
+        d.status || 'pending'
+      ]]);
+      return jsonResponse(200, { ok: true });
+    }
+
+    // Append one poll snapshot to a backup sheet (one row per play/update)
+    if (data.type === 'poll_backup' && data.sheetName && data.data) {
+      var pollBackupSheet = getOrCreateSheet(ss, data.sheetName);
+      var p = data.data;
+      if (pollBackupSheet.getLastRow() === 0) {
+        var header = ['Timestamp', 'Poll ID', 'Poll Title'];
+        if (p.options && p.options.length) {
+          p.options.forEach(function(opt, i) { header.push('Option ' + (i + 1)); header.push('Votes ' + (i + 1)); });
+        }
+        pollBackupSheet.getRange(1, 1, 1, header.length).setValues([header]);
+        pollBackupSheet.getRange(1, 1, 1, header.length).setFontWeight('bold');
+      }
+      var nextRow = pollBackupSheet.getLastRow() + 1;
+      var row = [p.timestamp || new Date().toISOString(), p.id || '', (p.title || '').toString()];
+      if (p.options && p.options.length) {
+        p.options.forEach(function(opt) {
+          row.push((opt.text || '').toString());
+          row.push(opt.votes != null ? opt.votes : '');
+        });
+      }
+      pollBackupSheet.getRange(nextRow, 1, nextRow, row.length).setValues([row]);
+      return jsonResponse(200, { ok: true });
+    }
     
     return jsonResponse(400, { ok: false, error: 'Unknown type or missing fields' });
   } catch (err) {

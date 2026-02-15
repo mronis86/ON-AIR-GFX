@@ -25,12 +25,13 @@ export default function EventDetailPage() {
   const [sessionDetailSession, setSessionDetailSession] = useState<QandA | null>(null);
   const navigate = useNavigate();
   
-  // Check for edit parameter in URL
+  // Check for edit parameter in URL (e.g. when opened from Operators panel modal)
   useEffect(() => {
     const editPollId = searchParams.get('edit');
     if (editPollId) {
       setEditingPoll(editPollId);
       setShowPollForm(false);
+      setSelectedTab('polls'); // Show Polls tab so the full edit form (including Bars start Y, etc.) is visible
     }
   }, [searchParams]);
   const [showSheetForm, setShowSheetForm] = useState(false);
@@ -38,6 +39,8 @@ export default function EventDetailPage() {
   const [webAppUrl, setWebAppUrl] = useState('');
   const [activeQASheetName, setActiveQASheetName] = useState('');
   const [activeQACell, setActiveQACell] = useState('');
+  const [qaBackupSheetName, setQaBackupSheetName] = useState('');
+  const [pollBackupSheetName, setPollBackupSheetName] = useState('');
   const [savingSheet, setSavingSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savingPollTab, setSavingPollTab] = useState<string | null>(null);
@@ -80,6 +83,8 @@ export default function EventDetailPage() {
         setWebAppUrl(eventData.googleSheetWebAppUrl || '');
         setActiveQASheetName(eventData.activeQASheetName || '');
         setActiveQACell(eventData.activeQACell || '');
+        setQaBackupSheetName(eventData.qaBackupSheetName || '');
+        setPollBackupSheetName(eventData.pollBackupSheetName || '');
         setRailwayBaseUrl(eventData.railwayLiveCsvBaseUrl || '');
         setError(null);
       } catch (err) {
@@ -117,6 +122,8 @@ export default function EventDetailPage() {
         googleSheetWebAppUrl: trimmedWebAppUrl || '',
         activeQASheetName: activeQASheetName.trim() || '',
         activeQACell: activeQACell.trim() || '',
+        qaBackupSheetName: qaBackupSheetName.trim() || undefined,
+        pollBackupSheetName: pollBackupSheetName.trim() || undefined,
         railwayLiveCsvBaseUrl: railwayBaseUrl.trim().replace(/\/+$/, '') || undefined,
       });
 
@@ -426,6 +433,8 @@ export default function EventDetailPage() {
                       setWebAppUrl(event.googleSheetWebAppUrl || '');
                       setActiveQASheetName(event.activeQASheetName || '');
                       setActiveQACell(event.activeQACell || '');
+                      setQaBackupSheetName(event.qaBackupSheetName || '');
+                      setPollBackupSheetName(event.pollBackupSheetName || '');
                       setRailwayBaseUrl(event.railwayLiveCsvBaseUrl || '');
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
@@ -472,6 +481,32 @@ export default function EventDetailPage() {
                     </div>
                   </div>
                   <p className="text-xs text-gray-500">The currently active Q&A question is written to this sheet/cell when it changes.</p>
+                </div>
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="qa-backup-sheet" className="block text-sm font-medium text-gray-700 mb-1">Q&A backup sub-sheet</label>
+                    <input
+                      id="qa-backup-sheet"
+                      type="text"
+                      value={qaBackupSheetName}
+                      onChange={(e) => setQaBackupSheetName(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g. QA_Submissions"
+                    />
+                    <p className="mt-0.5 text-xs text-gray-500">Append every Q&A submission (question, submitter, status) to this sheet. Requires Web App URL.</p>
+                  </div>
+                  <div>
+                    <label htmlFor="poll-backup-sheet" className="block text-sm font-medium text-gray-700 mb-1">Poll backup sub-sheet</label>
+                    <input
+                      id="poll-backup-sheet"
+                      type="text"
+                      value={pollBackupSheetName}
+                      onChange={(e) => setPollBackupSheetName(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g. Poll_Results"
+                    />
+                    <p className="mt-0.5 text-xs text-gray-500">Append each poll snapshot when a poll is played. Requires Web App URL.</p>
+                  </div>
                 </div>
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <p className="text-sm font-medium text-gray-700 mb-2">For the Free plan script CONFIG</p>

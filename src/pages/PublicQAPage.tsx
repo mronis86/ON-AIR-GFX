@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getQA, submitPublicQuestion } from '../services/firestore';
+import { getEvent, getQA, submitPublicQuestion } from '../services/firestore';
+import { postToWebApp } from '../services/googleSheets';
 import type { QandA } from '../types';
 
 export default function PublicQAPage() {
@@ -84,6 +85,23 @@ export default function PublicQAPage() {
         isAnonymous
       );
       setSubmitted(true);
+      if (qa.eventId) {
+        const eventData = await getEvent(qa.eventId);
+        if (eventData?.googleSheetWebAppUrl?.trim() && eventData?.qaBackupSheetName?.trim()) {
+          postToWebApp(eventData.googleSheetWebAppUrl.trim(), {
+            type: 'qa_backup',
+            sheetName: eventData.qaBackupSheetName.trim(),
+            data: {
+              timestamp: new Date().toISOString(),
+              sessionId: qaId,
+              question: question.trim(),
+              submitterName: isAnonymous ? '' : submitterName.trim(),
+              submitterEmail: isAnonymous ? '' : submitterEmail.trim(),
+              status: 'pending',
+            },
+          }).catch((err: unknown) => console.warn('Q&A backup to sheet failed:', err));
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit question');
     } finally {

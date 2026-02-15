@@ -80,45 +80,72 @@ body {
   to { opacity: 1; transform: scale(1); }
 }
 
-.transition-in-fade { animation: transition-in-fade 0.5s ease-out forwards; }
-.transition-in-slide-up { animation: transition-in-slide-up 0.5s ease-out forwards; }
-.transition-in-slide-down { animation: transition-in-slide-down 0.5s ease-out forwards; }
-.transition-in-slide-left { animation: transition-in-slide-left 0.5s ease-out forwards; }
-.transition-in-slide-right { animation: transition-in-slide-right 0.5s ease-out forwards; }
-.transition-in-scale { animation: transition-in-scale 0.5s ease-out forwards; }
+/* both = backwards + forwards: apply "from" state before first frame, keep "to" after */
+.transition-in-fade { animation: transition-in-fade 0.5s ease-out both; }
+.transition-in-slide-up { animation: transition-in-slide-up 0.5s ease-out both; }
+.transition-in-slide-down { animation: transition-in-slide-down 0.5s ease-out both; }
+.transition-in-slide-left { animation: transition-in-slide-left 0.5s ease-out both; }
+.transition-in-slide-right { animation: transition-in-slide-right 0.5s ease-out both; }
+.transition-in-scale { animation: transition-in-scale 0.5s ease-out both; }
+/* In without fade: slide/scale only (opacity 1 throughout) */
+@keyframes transition-in-slide-up-no-fade { from { opacity: 1; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } }
+@keyframes transition-in-slide-down-no-fade { from { opacity: 1; transform: translateY(-100%); } to { opacity: 1; transform: translateY(0); } }
+@keyframes transition-in-slide-left-no-fade { from { opacity: 1; transform: translateX(-100%); } to { opacity: 1; transform: translateX(0); } }
+@keyframes transition-in-slide-right-no-fade { from { opacity: 1; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+@keyframes transition-in-scale-no-fade { from { opacity: 1; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+.transition-in-slide-up-no-fade { animation: transition-in-slide-up-no-fade 0.5s ease-out both; }
+.transition-in-slide-down-no-fade { animation: transition-in-slide-down-no-fade 0.5s ease-out both; }
+.transition-in-slide-left-no-fade { animation: transition-in-slide-left-no-fade 0.5s ease-out both; }
+.transition-in-slide-right-no-fade { animation: transition-in-slide-right-no-fade 0.5s ease-out both; }
+.transition-in-scale-no-fade { animation: transition-in-scale-no-fade 0.5s ease-out both; }
+/* Hard cut: no animation, show immediately */
+.transition-in-none { opacity: 1 !important; animation: none !important; }
 
-/* Transition OUT keyframes - animate from visible to hidden (fixes hard cut) */
+/* Transition OUT keyframes - animate from visible to hidden; end state has visibility:hidden so element doesn't stay on screen */
 @keyframes transition-out-fade {
   from { opacity: 1; }
-  to { opacity: 0; }
+  to { opacity: 0; visibility: hidden; }
 }
 @keyframes transition-out-slide-up {
   from { opacity: 1; transform: translateY(0); }
-  to { opacity: 1; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(100%); visibility: hidden; }
 }
 @keyframes transition-out-slide-down {
   from { opacity: 1; transform: translateY(0); }
-  to { opacity: 1; transform: translateY(-100%); }
+  to { opacity: 1; transform: translateY(-100%); visibility: hidden; }
 }
 @keyframes transition-out-slide-left {
   from { opacity: 1; transform: translateX(0); }
-  to { opacity: 1; transform: translateX(-100%); }
+  to { opacity: 1; transform: translateX(-100%); visibility: hidden; }
 }
 @keyframes transition-out-slide-right {
   from { opacity: 1; transform: translateX(0); }
-  to { opacity: 1; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(100%); visibility: hidden; }
 }
 @keyframes transition-out-scale {
   from { opacity: 1; transform: scale(1); }
-  to { opacity: 0; transform: scale(0.95); }
+  to { opacity: 0; transform: scale(0.95); visibility: hidden; }
 }
 
-.transition-out-fade { animation: transition-out-fade 0.5s ease-out forwards; pointer-events: none; }
-.transition-out-slide-up { animation: transition-out-slide-up 0.5s ease-out forwards; pointer-events: none; }
-.transition-out-slide-down { animation: transition-out-slide-down 0.5s ease-out forwards; pointer-events: none; }
-.transition-out-slide-left { animation: transition-out-slide-left 0.5s ease-out forwards; pointer-events: none; }
-.transition-out-slide-right { animation: transition-out-slide-right 0.5s ease-out forwards; pointer-events: none; }
-.transition-out-scale { animation: transition-out-scale 0.5s ease-out forwards; pointer-events: none; }
+.transition-out-fade { animation: transition-out-fade 0.5s ease-out both; pointer-events: none; }
+.transition-out-slide-up { animation: transition-out-slide-up 0.5s ease-out both; pointer-events: none; }
+.transition-out-slide-down { animation: transition-out-slide-down 0.5s ease-out both; pointer-events: none; }
+.transition-out-slide-left { animation: transition-out-slide-left 0.5s ease-out both; pointer-events: none; }
+.transition-out-slide-right { animation: transition-out-slide-right 0.5s ease-out both; pointer-events: none; }
+.transition-out-scale { animation: transition-out-scale 0.5s ease-out both; pointer-events: none; }
+/* Out with fade: slide/scale + opacity 1→0 for smoother out; visibility:hidden so it doesn't stay on screen */
+@keyframes transition-out-slide-up-fade { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(100%); visibility: hidden; } }
+@keyframes transition-out-slide-down-fade { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-100%); visibility: hidden; } }
+@keyframes transition-out-slide-left-fade { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(-100%); visibility: hidden; } }
+@keyframes transition-out-slide-right-fade { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); visibility: hidden; } }
+@keyframes transition-out-scale-fade { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.95); visibility: hidden; } }
+.transition-out-slide-up-fade { animation: transition-out-slide-up-fade 0.5s ease-out both; pointer-events: none; }
+.transition-out-slide-down-fade { animation: transition-out-slide-down-fade 0.5s ease-out both; pointer-events: none; }
+.transition-out-slide-left-fade { animation: transition-out-slide-left-fade 0.5s ease-out both; pointer-events: none; }
+.transition-out-slide-right-fade { animation: transition-out-slide-right-fade 0.5s ease-out both; pointer-events: none; }
+.transition-out-scale-fade { animation: transition-out-scale-fade 0.5s ease-out both; pointer-events: none; }
+/* Hard cut: no animation, hide immediately */
+.transition-out-none { opacity: 0 !important; pointer-events: none; animation: none !important; }
 
 /* Hide scrollbars but allow scrolling */
 .hide-scrollbar {

@@ -249,6 +249,11 @@ export default function QAModerationPage() {
         setError('Active questions can only be completed via Stop. Use Operators to stop the active question.');
         return;
       }
+      // Done questions must be reset to pending or approved before they can be cued
+      if (qa.isDone) {
+        setError('Done questions cannot be set to Cue or Next. Reset the question to Pending or Approved first.');
+        return;
+      }
 
       // Update local state immediately for instant feedback
       setPendingQAs(prev => prev.map(q => {
@@ -288,6 +293,7 @@ export default function QAModerationPage() {
       const updates: Promise<void>[] = [];
       
       for (const q of allQAs) {
+        if (q.isDone) continue; // Never change cue/next on done questions
         if (q.id === qaId) {
           const updateData: Partial<QandA> = {
             isQueued: true,
@@ -352,6 +358,11 @@ export default function QAModerationPage() {
         setError('Active questions can only be completed via Stop. Use Operators to stop the active question.');
         return;
       }
+      // Done questions must be reset to pending or approved before they can be set as next
+      if (qa.isDone) {
+        setError('Done questions cannot be set to Cue or Next. Reset the question to Pending or Approved first.');
+        return;
+      }
 
       // Update local state immediately for instant feedback
       setPendingQAs(prev => prev.map(q => {
@@ -383,6 +394,7 @@ export default function QAModerationPage() {
       const updates: Promise<void>[] = [];
       
       for (const q of allQAs) {
+        if (q.isDone) continue; // Never change next on done questions
         if (q.id === qaId) {
           updates.push(updateQA(qaId, {
             isNext: true,
@@ -419,7 +431,8 @@ export default function QAModerationPage() {
     try {
       // Get all questions for this event (pending, approved, rejected, done)
       const allQuestions = await getQAsByEvent(eventId!);
-      const resetPromises = allQuestions.map(qa => 
+      const submissions = allQuestions.filter(qa => qa.question && !qa.name);
+      const resetPromises = submissions.map(qa => 
         updateQA(qa.id, { 
           status: 'pending' as QAStatus,
           isActive: false,
@@ -433,6 +446,49 @@ export default function QAModerationPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset questions');
       console.error('Error resetting questions:', err);
+    }
+  };
+
+  /** Reset a single question back to pending (for testing or re-use). */
+  const handleResetToPending = async (qaId: string) => {
+    try {
+      await updateQA(qaId, {
+        status: 'pending' as QAStatus,
+        isActive: false,
+        isNext: false,
+        isQueued: false,
+        isDone: false,
+      });
+      await loadData();
+      if (selectedQA?.id === qaId) setSelectedQA(prev => prev ? { ...prev, status: 'pending' as QAStatus, isActive: false, isNext: false, isQueued: false, isDone: false } : null);
+      setAllQuestions(prev => prev.map(q => q.id === qaId ? { ...q, status: 'pending' as QAStatus, isActive: false, isNext: false, isQueued: false, isDone: false } : q));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset question');
+      console.error('Error resetting question:', err);
+    }
+  };
+
+  /** Reset a single question to approved and clear queue flags (for testing — can then set Cue/Next again). */
+  const handleResetToApproved = async (qaId: string) => {
+    try {
+      const approved = await getQAsByStatus(eventId!, 'approved');
+      const maxOrder = approved.length > 0 ? Math.max(...approved.map(q => q.queueOrder ?? 0)) : 0;
+      await updateQA(qaId, {
+        status: 'approved' as QAStatus,
+        queueOrder: maxOrder + 1,
+        isActive: false,
+        isNext: false,
+        isQueued: false,
+        isDone: false,
+      });
+      await loadData();
+      if (selectedQA?.id === qaId) setSelectedQA(prev => prev ? { ...prev, status: 'approved' as QAStatus, isActive: false, isNext: false, isQueued: false, isDone: false } : null);
+      setAllQuestions(prev => prev.map(q => q.id === qaId ? { ...q, status: 'approved' as QAStatus, queueOrder: maxOrder + 1, isActive: false, isNext: false, isQueued: false, isDone: false } : q));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset question');
+      console.error('Error resetting question:', err);
     }
   };
 
@@ -692,12 +748,12 @@ export default function QAModerationPage() {
                               <span className="px-2 py-1 bg-green-600 text-white text-xs rounded">Active</span>
                             )}
                           </div>
-                          {/* Queue Button - disabled for active (can only go to Done via Stop) */}
+                          {/* Queue Button - disabled for active or done (must reset first) */}
                           <button
-                            onClick={() => !qa.isActive && handleQueue(qa.id)}
-                            disabled={qa.isActive}
+                            onClick={() => !qa.isActive && !qa.isDone && handleQueue(qa.id)}
+                            disabled={qa.isActive || qa.isDone}
                             className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-                              qa.isActive
+                              qa.isActive || qa.isDone
                                 ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
                                 : qa.isQueued
                                 ? 'bg-orange-600 hover:bg-orange-700'
@@ -706,12 +762,12 @@ export default function QAModerationPage() {
                           >
                             {qa.isQueued ? 'Cue' : 'Cue'}
                           </button>
-                          {/* Next Button - disabled for active (can only go to Done via Stop) */}
+                          {/* Next Button - disabled for active or done (must reset first) */}
                           <button
-                            onClick={() => !qa.isActive && handleSetNext(qa.id)}
-                            disabled={qa.isActive}
+                            onClick={() => !qa.isActive && !qa.isDone && handleSetNext(qa.id)}
+                            disabled={qa.isActive || qa.isDone}
                             className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-                              qa.isActive
+                              qa.isActive || qa.isDone
                                 ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
                                 : qa.isNext
                                 ? 'bg-purple-600 hover:bg-purple-700'
@@ -821,10 +877,10 @@ export default function QAModerationPage() {
                       </div>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => !selectedQA.isActive && handleQueue(selectedQA.id)}
-                          disabled={selectedQA.isActive}
+                          onClick={() => !selectedQA.isActive && !selectedQA.isDone && handleQueue(selectedQA.id)}
+                          disabled={selectedQA.isActive || selectedQA.isDone}
                           className={`flex-1 px-4 py-2 rounded-lg transition-colors font-medium ${
-                            selectedQA.isActive
+                            selectedQA.isActive || selectedQA.isDone
                               ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
                               : selectedQA.isQueued
                               ? 'bg-orange-600 hover:bg-orange-700'
@@ -834,10 +890,10 @@ export default function QAModerationPage() {
                           {selectedQA.isQueued ? 'Cue' : 'Cue'}
                         </button>
                         <button
-                          onClick={() => !selectedQA.isActive && handleSetNext(selectedQA.id)}
-                          disabled={selectedQA.isActive}
+                          onClick={() => !selectedQA.isActive && !selectedQA.isDone && handleSetNext(selectedQA.id)}
+                          disabled={selectedQA.isActive || selectedQA.isDone}
                           className={`flex-1 px-4 py-2 rounded-lg transition-colors font-medium ${
-                            selectedQA.isActive
+                            selectedQA.isActive || selectedQA.isDone
                               ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
                               : selectedQA.isNext
                               ? 'bg-purple-600 hover:bg-purple-700'
@@ -849,8 +905,24 @@ export default function QAModerationPage() {
                       </div>
                     </div>
                   )}
-
-
+                  {/* Reset for testing — restore a question to Pending or Approved so it can be cued again */}
+                  <div className="pt-2 border-t border-gray-600">
+                    <div className="text-xs text-gray-400 mb-1.5">Reset for testing</div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleResetToPending(selectedQA.id)}
+                        className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm transition-colors"
+                      >
+                        Reset to Pending
+                      </button>
+                      <button
+                        onClick={() => handleResetToApproved(selectedQA.id)}
+                        className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm transition-colors"
+                      >
+                        Reset to Approved
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </>
@@ -935,10 +1007,10 @@ export default function QAModerationPage() {
                       Edit
                     </button>
                     <button
-                      onClick={() => !selectedQA.isActive && handleSetNext(selectedQA.id)}
-                      disabled={selectedQA.isActive}
+                      onClick={() => !selectedQA.isActive && !selectedQA.isDone && handleSetNext(selectedQA.id)}
+                      disabled={selectedQA.isActive || selectedQA.isDone}
                       className={`px-4 py-2 rounded-lg transition-colors ${
-                        selectedQA.isActive
+                        selectedQA.isActive || selectedQA.isDone
                           ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
                           : selectedQA.isNext
                           ? 'bg-blue-600 hover:bg-blue-700'
@@ -1045,16 +1117,30 @@ export default function QAModerationPage() {
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-700">
+                          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-700 flex-wrap gap-2">
                             <div className="text-xs text-gray-500">
                               {new Date(qa.createdAt).toLocaleString()}
                             </div>
-                            <button
-                              onClick={() => handleDeleteQuestion(qa.id)}
-                              className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm transition-colors"
-                            >
-                              Delete
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleResetToPending(qa.id)}
+                                className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs transition-colors"
+                              >
+                                To Pending
+                              </button>
+                              <button
+                                onClick={() => handleResetToApproved(qa.id)}
+                                className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs transition-colors"
+                              >
+                                To Approved
+                              </button>
+                              <button
+                                onClick={() => handleDeleteQuestion(qa.id)}
+                                className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>

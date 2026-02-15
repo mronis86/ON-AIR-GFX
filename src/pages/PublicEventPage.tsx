@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { getEvent, getPollsByEvent, submitPollVotes, getQAsByEvent, submitPublicQuestion } from '../services/firestore';
+import { postToWebApp } from '../services/googleSheets';
 import type { Event, Poll, QandA } from '../types';
 
 type TabType = 'polls' | 'qa';
@@ -196,6 +197,20 @@ export default function PublicEventPage() {
         qaIsAnonymous[qaId] || false
       );
       setSubmittedQAs(prev => new Set([...prev, qaId]));
+      if (event?.googleSheetWebAppUrl?.trim() && event?.qaBackupSheetName?.trim()) {
+        postToWebApp(event.googleSheetWebAppUrl.trim(), {
+          type: 'qa_backup',
+          sheetName: event.qaBackupSheetName.trim(),
+          data: {
+            timestamp: new Date().toISOString(),
+            sessionId: qaId,
+            question,
+            submitterName: qaIsAnonymous[qaId] ? '' : (qaSubmitterNames[qaId]?.trim() || ''),
+            submitterEmail: qaIsAnonymous[qaId] ? '' : (email || ''),
+            status: 'pending',
+          },
+        }).catch((err: unknown) => console.warn('Q&A backup to sheet failed:', err));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit question');
     } finally {

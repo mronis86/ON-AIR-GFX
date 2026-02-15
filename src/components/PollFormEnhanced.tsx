@@ -47,7 +47,7 @@ export default function PollFormEnhanced({ eventId, poll, onSuccess, onCancel }:
   const [showVoteCount, setShowVoteCount] = useState(poll?.showVoteCount !== false); // Default true
   // Per-layout title settings
   const [titleSettings, setTitleSettings] = useState<{
-    fullScreen?: { fontSize?: number; yPosition?: number; justification?: 'left' | 'center' | 'right' };
+    fullScreen?: { fontSize?: number; yPosition?: number; justification?: 'left' | 'center' | 'right'; contentYPosition?: number };
     lowerThird?: { fontSize?: number; yPosition?: number; justification?: 'left' | 'center' | 'right' };
     pip?: { fontSize?: number; yPosition?: number; justification?: 'left' | 'center' | 'right' };
   }>(poll?.titleSettings || {});
@@ -600,7 +600,8 @@ export default function PollFormEnhanced({ eventId, poll, onSuccess, onCancel }:
                       const justification = e.target.value as 'left' | 'center' | 'right';
                       setTitleSettings(prev => ({
                         ...prev,
-                        fullScreen: { 
+                        fullScreen: {
+                          ...prev.fullScreen,
                           fontSize: prev.fullScreen?.fontSize || 80,
                           yPosition: prev.fullScreen?.yPosition || 0,
                           justification: justification,
@@ -614,6 +615,26 @@ export default function PollFormEnhanced({ eventId, poll, onSuccess, onCancel }:
                     <option value="right">Right</option>
                   </select>
                 </div>
+              </div>
+              <div className="mt-3">
+                <label className="block text-xs text-gray-600 mb-1">Bars start Y position (px)</label>
+                <input
+                  type="number"
+                  min="-200"
+                  max="400"
+                  value={titleSettings.fullScreen?.contentYPosition ?? 0}
+                  onChange={(e) => {
+                    const contentYPosition = parseInt(e.target.value, 10);
+                    const value = isNaN(contentYPosition) ? 0 : Math.max(-200, Math.min(400, contentYPosition));
+                    setTitleSettings(prev => ({
+                      ...prev,
+                      fullScreen: { ...prev.fullScreen, contentYPosition: value },
+                    }));
+                  }}
+                  className="w-full max-w-[120px] px-3 py-2 border border-gray-300 rounded-md text-sm"
+                  placeholder="0"
+                />
+                <span className="text-xs text-gray-500 mt-1 block">Positive = bars start lower (title stays in place)</span>
               </div>
             </div>
             )}
@@ -1820,7 +1841,9 @@ export default function PollFormEnhanced({ eventId, poll, onSuccess, onCancel }:
                         borderRadius: `${borderRadius}px`,
                       }}
                     >
-                      <PollDisplay key={`preview-${barEdgeStyle}-${borderRadius}`} poll={{ ...previewPoll, layoutStyle: 1, fullScreenStyle, barEdgeStyle, borderRadius }} />
+                      <div style={{ width: '100%', height: '100%', minWidth: 0 }}>
+                        <PollDisplay key={`preview-${barEdgeStyle}-${borderRadius}`} poll={{ ...previewPoll, layoutStyle: 1, fullScreenStyle, barEdgeStyle, borderRadius }} />
+                      </div>
                     </div>
                   </div>
                 </div>

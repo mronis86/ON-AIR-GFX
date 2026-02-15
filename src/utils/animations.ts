@@ -5,6 +5,9 @@ export type AnimationType = 'fade' | 'slideUp' | 'slideDown' | 'slideLeft' | 'sl
 
 const MIN_TRANSITION_ON_DELAY_MS = 50;
 
+/** CSS animation duration used for transition-in/out keyframes. Keep in sync with style.css. */
+export const ANIMATION_DURATION_MS = 500;
+
 /** Run after delay (min 50ms), then after three rAFs so the "hidden" state is painted, then callback next frame. Use for transition-in. */
 export function afterDelayThenPaint(delayMs: number, callback: () => void): void {
   const delay = Math.max(MIN_TRANSITION_ON_DELAY_MS, delayMs);
@@ -17,30 +20,66 @@ export function afterDelayThenPaint(delayMs: number, callback: () => void): void
   }, delay);
 }
 
-/** Class name for transition-in: uses keyframe animation so "from" state is explicit (no prior paint needed). */
-export const getTransitionInClass = (animationType: AnimationType): string => {
-  const map: Record<AnimationType, string> = {
-    fade: 'transition-in-fade',
-    slideUp: 'transition-in-slide-up',
-    slideDown: 'transition-in-slide-down',
-    slideLeft: 'transition-in-slide-left',
-    slideRight: 'transition-in-slide-right',
-    scale: 'transition-in-scale',
-  };
-  return map[animationType] ?? 'transition-in-fade';
+const SLIDE_SCALE_TYPES: AnimationType[] = ['slideUp', 'slideDown', 'slideLeft', 'slideRight', 'scale'];
+
+/** Class name for transition-in. Slide/scale use fade only when fadeInWithSlide is true. */
+export const getTransitionInClass = (
+  animationType: AnimationType,
+  useHardCut?: boolean,
+  fadeInWithSlide: boolean = true
+): string => {
+  if (useHardCut) return 'transition-in-none';
+  if (animationType === 'fade') return 'transition-in-fade';
+  if (SLIDE_SCALE_TYPES.includes(animationType)) {
+    const withFade: Record<AnimationType, string> = {
+      fade: 'transition-in-fade',
+      slideUp: 'transition-in-slide-up',
+      slideDown: 'transition-in-slide-down',
+      slideLeft: 'transition-in-slide-left',
+      slideRight: 'transition-in-slide-right',
+      scale: 'transition-in-scale',
+    };
+    const noFade: Record<AnimationType, string> = {
+      fade: 'transition-in-fade',
+      slideUp: 'transition-in-slide-up-no-fade',
+      slideDown: 'transition-in-slide-down-no-fade',
+      slideLeft: 'transition-in-slide-left-no-fade',
+      slideRight: 'transition-in-slide-right-no-fade',
+      scale: 'transition-in-scale-no-fade',
+    };
+    return fadeInWithSlide ? (withFade[animationType] ?? 'transition-in-fade') : (noFade[animationType] ?? 'transition-in-fade');
+  }
+  return 'transition-in-fade';
 };
 
-/** Class name for transition-out: uses keyframe animation (same as transition-in) so out animates smoothly. */
-export const getTransitionOutClass = (animationType: AnimationType): string => {
-  const map: Record<AnimationType, string> = {
-    fade: 'transition-out-fade',
-    slideUp: 'transition-out-slide-up',
-    slideDown: 'transition-out-slide-down',
-    slideLeft: 'transition-out-slide-left',
-    slideRight: 'transition-out-slide-right',
-    scale: 'transition-out-scale',
-  };
-  return map[animationType] ?? 'transition-out-fade';
+/** Class name for transition-out. Slide/scale use fade only when fadeOutWithSlide is true. */
+export const getTransitionOutClass = (
+  animationType: AnimationType,
+  useHardCut?: boolean,
+  fadeOutWithSlide: boolean = true
+): string => {
+  if (useHardCut) return 'transition-out-none';
+  if (animationType === 'fade') return 'transition-out-fade';
+  if (SLIDE_SCALE_TYPES.includes(animationType)) {
+    const withFade: Record<AnimationType, string> = {
+      fade: 'transition-out-fade',
+      slideUp: 'transition-out-slide-up-fade',
+      slideDown: 'transition-out-slide-down-fade',
+      slideLeft: 'transition-out-slide-left-fade',
+      slideRight: 'transition-out-slide-right-fade',
+      scale: 'transition-out-scale-fade',
+    };
+    const noFade: Record<AnimationType, string> = {
+      fade: 'transition-out-fade',
+      slideUp: 'transition-out-slide-up',
+      slideDown: 'transition-out-slide-down',
+      slideLeft: 'transition-out-slide-left',
+      slideRight: 'transition-out-slide-right',
+      scale: 'transition-out-scale',
+    };
+    return fadeOutWithSlide ? (withFade[animationType] ?? 'transition-out-fade') : (noFade[animationType] ?? 'transition-out-fade');
+  }
+  return 'transition-out-fade';
 };
 
 /** Inline style for animation OUT state. Use when keyframe classes aren't available (e.g. Tailwind purging).
@@ -111,7 +150,16 @@ export const getAnimationClasses = (
 export interface AnimationSettings {
   animationInType: AnimationType;
   animationOutType: AnimationType;
+  /** When true, no in/out animation — content appears and disappears instantly (hard cut). */
+  useHardCut: boolean;
+  /** When true (default), slide/scale in includes a slight fade. Only applies when Animation In is slide or scale. */
+  fadeInWithSlide: boolean;
+  /** When true (default), slide/scale out includes a slight fade. Only applies when Animation Out is slide or scale. */
+  fadeOutWithSlide: boolean;
+  /** Animation In only: show background before content animates in. */
   backgroundAnimateFirst: boolean;
+  /** Animation Out only: keep background visible while content animates out (then hide background). */
+  contentOutFirst: boolean;
   /** Global delay (ms) before content transition-in for polls and Q&A — ensures data is loaded and hidden frame is painted. */
   qaAnimateInDelayMs: number;
 }
@@ -119,7 +167,11 @@ export interface AnimationSettings {
 const DEFAULT_ANIMATION_SETTINGS: AnimationSettings = {
   animationInType: 'fade',
   animationOutType: 'fade',
+  useHardCut: false,
+  fadeInWithSlide: true,
+  fadeOutWithSlide: true,
   backgroundAnimateFirst: false,
+  contentOutFirst: false,
   qaAnimateInDelayMs: 100,
 };
 
@@ -135,9 +187,10 @@ export const getAnimationSettings = (): AnimationSettings => {
   return DEFAULT_ANIMATION_SETTINGS;
 };
 
-export const saveAnimationSettings = (settings: AnimationSettings): void => {
+export const saveAnimationSettings = (settings: Partial<AnimationSettings>): void => {
   try {
-    localStorage.setItem('animationSettings', JSON.stringify(settings));
+    const current = getAnimationSettings();
+    localStorage.setItem('animationSettings', JSON.stringify({ ...current, ...settings }));
   } catch (err) {
     console.error('Error saving animation settings:', err);
   }

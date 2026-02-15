@@ -114,6 +114,14 @@ export const updateEvent = async (eventId: string, updates: Partial<Event>): Pro
     if (updates.activeQACell) cleanUpdates.activeQACell = updates.activeQACell;
     else cleanUpdates.activeQACell = deleteField();
   }
+  if (updates.qaBackupSheetName !== undefined) {
+    if (updates.qaBackupSheetName) cleanUpdates.qaBackupSheetName = updates.qaBackupSheetName;
+    else cleanUpdates.qaBackupSheetName = deleteField();
+  }
+  if (updates.pollBackupSheetName !== undefined) {
+    if (updates.pollBackupSheetName) cleanUpdates.pollBackupSheetName = updates.pollBackupSheetName;
+    else cleanUpdates.pollBackupSheetName = deleteField();
+  }
   if (updates.publicLink !== undefined) {
     if (updates.publicLink) {
       cleanUpdates.publicLink = updates.publicLink;

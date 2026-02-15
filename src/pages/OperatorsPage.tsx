@@ -73,6 +73,9 @@ export default function OperatorsPage() {
   const initialAnimationSettings = getAnimationSettings();
   const [animationInType, setAnimationInType] = useState<'fade' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'scale'>(initialAnimationSettings.animationInType);
   const [animationOutType, setAnimationOutType] = useState<'fade' | 'slideUp' | 'slideDown' | 'slideLeft' | 'slideRight' | 'scale'>(initialAnimationSettings.animationOutType);
+  const [useHardCut, setUseHardCut] = useState(initialAnimationSettings.useHardCut ?? false);
+  const [fadeInWithSlide, setFadeInWithSlide] = useState(initialAnimationSettings.fadeInWithSlide ?? true);
+  const [fadeOutWithSlide, setFadeOutWithSlide] = useState(initialAnimationSettings.fadeOutWithSlide ?? true);
   const [backgroundAnimateFirst, setBackgroundAnimateFirst] = useState(initialAnimationSettings.backgroundAnimateFirst);
   const [qaAnimateInDelayMs, setQAAnimateInDelayMs] = useState(initialAnimationSettings.qaAnimateInDelayMs ?? 100);
   const [showOutputOptions, setShowOutputOptions] = useState(false);
@@ -365,6 +368,19 @@ export default function OperatorsPage() {
       });
     }
 
+    if (activePoll && selectedEvent?.pollBackupSheetName?.trim()) {
+      post({
+        type: 'poll_backup',
+        sheetName: selectedEvent.pollBackupSheetName.trim(),
+        data: {
+          timestamp: new Date().toISOString(),
+          id: activePoll.id,
+          title: activePoll.title,
+          options: (activePoll.options || []).map(o => ({ text: o.text, votes: o.votes ?? 0 })),
+        },
+      });
+    }
+
     if (selectedEvent && selectedEvent.activeQASheetName?.trim() && selectedEvent.activeQACell?.trim()) {
       post({
         type: 'qa_active',
@@ -384,7 +400,9 @@ export default function OperatorsPage() {
     selectedEvent?.googleSheetWebAppUrl,
     selectedEvent?.activeQASheetName,
     selectedEvent?.activeQACell,
+    selectedEvent?.pollBackupSheetName,
     activePoll?.id,
+    activePoll?.title,
     activePoll?.googleSheetTab,
     activePoll?.options,
     activeQA?.id,
@@ -1166,6 +1184,7 @@ export default function OperatorsPage() {
               <input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
@@ -1460,77 +1479,195 @@ export default function OperatorsPage() {
         </div>
       )}
 
-      {/* Settings Menu */}
+      {/* Animation Settings popout - full rebuild */}
       {showSettings && (
-        <div className="fixed top-20 right-6 bg-gray-800 border-2 border-gray-600 rounded-lg shadow-2xl z-40 p-6 min-w-[300px]">
-          <div className="flex items-center justify-between mb-4">
+        <div className="fixed top-20 right-6 bg-gray-800 border-2 border-gray-600 rounded-xl shadow-2xl z-40 p-6 min-w-[320px] max-w-[360px]">
+          <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-600">
             <h3 className="text-lg font-semibold text-white">Animation Settings</h3>
             <button
               onClick={() => setShowSettings(false)}
-              className="text-gray-400 hover:text-white transition-colors"
+              className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-700"
+              aria-label="Close settings"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Animation In
+
+          <div className="space-y-5">
+            {/* Hard Cut - no in/out animation */}
+            <div className="rounded-lg bg-gray-700/40 p-3 border border-gray-600">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useHardCut}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setUseHardCut(val);
+                    saveAnimationSettings({
+                      animationInType,
+                      animationOutType,
+                      useHardCut: val,
+                      fadeInWithSlide,
+                      fadeOutWithSlide,
+                      backgroundAnimateFirst,
+                      contentOutFirst: getAnimationSettings().contentOutFirst ?? false,
+                      qaAnimateInDelayMs,
+                    });
+                  }}
+                  className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                />
+                <span className="text-sm font-medium text-white">Hard cut</span>
               </label>
-              <select
-                value={animationInType}
-                onChange={(e) => {
-                  const newType = e.target.value as any;
-                  setAnimationInType(newType);
-                  saveAnimationSettings({
-                    animationInType: newType,
-                    animationOutType,
-                    backgroundAnimateFirst,
-                    qaAnimateInDelayMs,
-                  });
-                }}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              >
-                <option value="fade">Fade</option>
-                <option value="slideUp">Slide Up</option>
-                <option value="slideDown">Slide Down</option>
-                <option value="slideLeft">Slide Left</option>
-                <option value="slideRight">Slide Right</option>
-                <option value="scale">Scale</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Animation Out
-              </label>
-              <select
-                value={animationOutType}
-                onChange={(e) => {
-                  const newType = e.target.value as any;
-                  setAnimationOutType(newType);
-                  saveAnimationSettings({
-                    animationInType,
-                    animationOutType: newType,
-                    backgroundAnimateFirst,
-                    qaAnimateInDelayMs,
-                  });
-                }}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              >
-                <option value="fade">Fade</option>
-                <option value="slideUp">Slide Up</option>
-                <option value="slideDown">Slide Down</option>
-                <option value="slideLeft">Slide Left</option>
-                <option value="slideRight">Slide Right</option>
-                <option value="scale">Scale</option>
-              </select>
+              <p className="text-xs text-gray-500 mt-1 ml-6">Content appears and disappears instantly (no in/out animation).</p>
             </div>
 
-            <div>
+            {/* Animation types - disabled when hard cut */}
+            <div className={useHardCut ? 'opacity-60 pointer-events-none' : ''}>
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Animation In</label>
+                <select
+                  value={animationInType}
+                  onChange={(e) => {
+                    const newType = e.target.value as typeof animationInType;
+                    setAnimationInType(newType);
+                    saveAnimationSettings({
+                      animationInType: newType,
+                      animationOutType,
+                      useHardCut,
+                      fadeInWithSlide,
+                      fadeOutWithSlide,
+                      backgroundAnimateFirst,
+                      contentOutFirst: getAnimationSettings().contentOutFirst ?? false,
+                      qaAnimateInDelayMs,
+                    });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <option value="fade">Fade</option>
+                  <option value="slideUp">Slide Up</option>
+                  <option value="slideDown">Slide Down</option>
+                  <option value="slideLeft">Slide Left</option>
+                  <option value="slideRight">Slide Right</option>
+                  <option value="scale">Scale</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Animation Out</label>
+                <select
+                  value={animationOutType}
+                  onChange={(e) => {
+                    const newType = e.target.value as typeof animationOutType;
+                    setAnimationOutType(newType);
+                    saveAnimationSettings({
+                      animationInType,
+                      animationOutType: newType,
+                      useHardCut,
+                      fadeInWithSlide,
+                      fadeOutWithSlide,
+                      backgroundAnimateFirst,
+                      contentOutFirst: getAnimationSettings().contentOutFirst ?? false,
+                      qaAnimateInDelayMs,
+                    });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <option value="fade">Fade</option>
+                  <option value="slideUp">Slide Up</option>
+                  <option value="slideDown">Slide Down</option>
+                  <option value="slideLeft">Slide Left</option>
+                  <option value="slideRight">Slide Right</option>
+                  <option value="scale">Scale</option>
+                </select>
+              </div>
+              {/* Fade with slide - only show when Animation In or Out is slide/scale */}
+              {(['slideUp', 'slideDown', 'slideLeft', 'slideRight', 'scale'].includes(animationInType) || ['slideUp', 'slideDown', 'slideLeft', 'slideRight', 'scale'].includes(animationOutType)) && (
+                <div className="mt-3 space-y-2">
+                  {['slideUp', 'slideDown', 'slideLeft', 'slideRight', 'scale'].includes(animationInType) && (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={fadeInWithSlide}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setFadeInWithSlide(val);
+                          saveAnimationSettings({
+                            animationInType,
+                            animationOutType,
+                            useHardCut,
+                            fadeInWithSlide: val,
+                            fadeOutWithSlide,
+                            backgroundAnimateFirst,
+                            contentOutFirst: getAnimationSettings().contentOutFirst ?? false,
+                            qaAnimateInDelayMs,
+                          });
+                        }}
+                        className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                      />
+                      <span className="text-sm font-medium text-gray-300">Fade with slide in</span>
+                    </label>
+                  )}
+                  {['slideUp', 'slideDown', 'slideLeft', 'slideRight', 'scale'].includes(animationOutType) && (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={fadeOutWithSlide}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setFadeOutWithSlide(val);
+                          saveAnimationSettings({
+                            animationInType,
+                            animationOutType,
+                            useHardCut,
+                            fadeInWithSlide,
+                            fadeOutWithSlide: val,
+                            backgroundAnimateFirst,
+                            contentOutFirst: getAnimationSettings().contentOutFirst ?? false,
+                            qaAnimateInDelayMs,
+                          });
+                        }}
+                        className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                      />
+                      <span className="text-sm font-medium text-gray-300">Fade with slide out</span>
+                    </label>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Transition-in delay only */}
+            <div className={useHardCut ? 'opacity-60 pointer-events-none' : ''}>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Transition-in delay (ms)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={10000}
+                  step={100}
+                  value={qaAnimateInDelayMs}
+                  onChange={(e) => {
+                    const val = Math.max(0, Math.min(10000, Number(e.target.value) || 0));
+                    setQAAnimateInDelayMs(val);
+                    saveAnimationSettings({
+                      animationInType,
+                      animationOutType,
+                      useHardCut,
+                      fadeInWithSlide,
+                      fadeOutWithSlide,
+                      backgroundAnimateFirst,
+                      contentOutFirst: getAnimationSettings().contentOutFirst ?? false,
+                      qaAnimateInDelayMs: val,
+                    });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">Delay before content animates in (0–10000 ms).</p>
+              </div>
+            </div>
+
+            {/* Background option */}
+            <div className="pt-2 border-t border-gray-600">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1541,42 +1678,19 @@ export default function OperatorsPage() {
                     saveAnimationSettings({
                       animationInType,
                       animationOutType,
+                      useHardCut,
+                      fadeInWithSlide,
+                      fadeOutWithSlide,
                       backgroundAnimateFirst: newValue,
+                      contentOutFirst: getAnimationSettings().contentOutFirst ?? false,
                       qaAnimateInDelayMs,
                     });
                   }}
                   className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
                 />
-                <span className="text-sm font-medium text-gray-300">Animate Background Before Content</span>
+                <span className="text-sm font-medium text-gray-300">Animate background before content</span>
               </label>
-              <p className="text-xs text-gray-500 mt-1">When enabled, background appears first, then content animates in</p>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Transition on delay (ms)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={10000}
-                step={100}
-                value={qaAnimateInDelayMs}
-                onChange={(e) => {
-                  const val = Math.max(0, Math.min(10000, Number(e.target.value) || 0));
-                  setQAAnimateInDelayMs(val);
-                  saveAnimationSettings({
-                    animationInType,
-                    animationOutType,
-                    backgroundAnimateFirst,
-                    qaAnimateInDelayMs: val,
-                  });
-                }}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-              <p className="text-xs text-gray-500 mt-1">Global delay before polls and Q&A transition in (0–10 s). Ensures content is loaded and animation runs.</p>
-            </div>
-
           </div>
         </div>
       )}

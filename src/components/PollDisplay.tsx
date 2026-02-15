@@ -376,6 +376,8 @@ export default function PollDisplay({ poll, disableBackground = false }: PollDis
   const titleFontSize = currentTitleSettings.fontSize || 80;
   const titleYPosition = currentTitleSettings.yPosition || 0;
   const titleJustification = currentTitleSettings.justification || 'center';
+  // Full screen only: Y position for where the content (title + bars) starts (positive = down)
+  const fullScreenContentY = (layoutStyle === 1 && titleSettings.fullScreen?.contentYPosition != null) ? titleSettings.fullScreen.contentYPosition : 0;
 
   // Get text alignment style value based on justification
   const getJustificationStyle = () => {
@@ -394,14 +396,22 @@ export default function PollDisplay({ poll, disableBackground = false }: PollDis
   const borderStyle = disableBackground ? {} : getBorderStyle();
   
   return (
-    <div className="px-8 max-w-6xl w-full flex flex-col" style={{ minHeight: '0', paddingTop: '0', ...backgroundStyle, ...borderStyle }}>
+    <div
+      className="px-8 max-w-6xl w-full flex flex-col"
+      style={{
+        minHeight: '0',
+        paddingTop: '0',
+        ...backgroundStyle,
+        ...borderStyle,
+      }}
+    >
       {showTitle && (
         <div
           className="flex-shrink-0 w-full"
           style={{
             marginTop: '0',
             paddingTop: '0.5rem',
-            transform: `translateY(${titleYPosition}px)`, // Y position adjustment
+            transform: `translateY(${titleYPosition}px)`, // Y position adjustment (title only)
             display: 'flex',
             justifyContent: titleJustification === 'left' ? 'flex-start' : titleJustification === 'right' ? 'flex-end' : 'center',
           }}
@@ -432,7 +442,14 @@ export default function PollDisplay({ poll, disableBackground = false }: PollDis
           </div>
         </div>
       )}
-      <div className="flex-1 min-h-0 overflow-hidden hide-scrollbar" style={{ overflowY: 'hidden', overflowX: 'hidden' }}>
+      <div
+        className="flex-1 min-h-0 overflow-hidden hide-scrollbar"
+        style={{
+          overflowY: 'hidden',
+          overflowX: 'hidden',
+          ...(layoutStyle === 1 && fullScreenContentY !== 0 ? { marginTop: `${fullScreenContentY}px` } : {}),
+        }}
+      >
         {renderDisplay()}
       </div>
     </div>
