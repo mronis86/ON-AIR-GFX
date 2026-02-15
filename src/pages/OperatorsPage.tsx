@@ -5,7 +5,7 @@ import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
 import { getAnimationClasses, getTransitionInClass, afterDelayThenPaint, saveAnimationSettings, getAnimationSettings } from '../utils/animations';
-import { postToWebApp } from '../services/googleSheets';
+import { getPollBackupSheetName, postToWebApp } from '../services/googleSheets';
 import { buildLiveQaCsv6, buildPollCsv, downloadCsv } from '../utils/liveDataCsv';
 import { getTimedRefreshScript } from '../constants/googleSheetScript';
 
@@ -351,8 +351,9 @@ export default function OperatorsPage() {
     const webAppUrl = selectedEvent?.googleSheetWebAppUrl?.trim();
     if (!webAppUrl) return;
 
+    const railwayBase = selectedEvent?.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '');
     const post = (body: object) =>
-      postToWebApp(webAppUrl, body).catch((err: unknown) => console.warn('Google Sheet web app POST failed:', err));
+      postToWebApp(webAppUrl, body, railwayBase || undefined).catch((err: unknown) => console.warn('Google Sheet web app POST failed:', err));
 
     if (activePoll?.googleSheetTab?.trim()) {
       post({
@@ -368,10 +369,13 @@ export default function OperatorsPage() {
       });
     }
 
-    if (activePoll && selectedEvent?.pollBackupSheetName?.trim()) {
+    const pollBackupEnabled =
+      selectedEvent?.pollBackupSheetName?.trim() ||
+      (selectedEvent?.pollBackupPerPoll && selectedEvent?.pollBackupSheetPrefix?.trim());
+    if (activePoll && selectedEvent && pollBackupEnabled) {
       post({
         type: 'poll_backup',
-        sheetName: selectedEvent.pollBackupSheetName.trim(),
+        sheetName: getPollBackupSheetName(selectedEvent, activePoll.id),
         data: {
           timestamp: new Date().toISOString(),
           id: activePoll.id,
@@ -401,6 +405,8 @@ export default function OperatorsPage() {
     selectedEvent?.activeQASheetName,
     selectedEvent?.activeQACell,
     selectedEvent?.pollBackupSheetName,
+    selectedEvent?.pollBackupPerPoll,
+    selectedEvent?.pollBackupSheetPrefix,
     activePoll?.id,
     activePoll?.title,
     activePoll?.googleSheetTab,

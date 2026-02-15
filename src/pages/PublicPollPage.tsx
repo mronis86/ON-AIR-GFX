@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { getPoll, submitPollVotes } from '../services/firestore';
+import { getEvent, getPoll, submitPollVotes } from '../services/firestore';
+import { getPollBackupSheetName, postToWebApp } from '../services/googleSheets';
 import type { Poll } from '../types';
 
 export default function PublicPollPage() {
@@ -65,6 +66,31 @@ export default function PublicPollPage() {
       setError(null);
       await submitPollVotes(pollId, selectedOptions);
       setSubmitted(true);
+      // Backup poll to sheet on user vote (in advance of operators)
+      if (poll?.eventId) {
+        const [updatedPoll, eventData] = await Promise.all([getPoll(pollId!), getEvent(poll.eventId)]);
+        const pollBackupEnabled =
+          eventData?.googleSheetWebAppUrl?.trim() &&
+          (eventData?.pollBackupSheetName?.trim() || (eventData?.pollBackupPerPoll && eventData?.pollBackupSheetPrefix?.trim()));
+        if (updatedPoll && pollBackupEnabled && eventData?.googleSheetWebAppUrl) {
+          const ev = eventData;
+          const webAppUrl = ev.googleSheetWebAppUrl!.trim();
+          postToWebApp(
+            webAppUrl,
+            {
+              type: 'poll_backup',
+              sheetName: getPollBackupSheetName(ev, updatedPoll.id),
+              data: {
+                timestamp: new Date().toISOString(),
+                id: updatedPoll.id,
+                title: updatedPoll.title,
+                options: (updatedPoll.options || []).map(o => ({ text: o.text, votes: o.votes ?? 0 })),
+              },
+            },
+            ev.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '')
+          ).catch((err: unknown) => console.warn('Poll backup to sheet failed:', err));
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit vote');
     }

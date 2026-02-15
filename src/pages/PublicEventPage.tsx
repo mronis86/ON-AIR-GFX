@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { getEvent, getPollsByEvent, submitPollVotes, getQAsByEvent, submitPublicQuestion } from '../services/firestore';
-import { postToWebApp } from '../services/googleSheets';
+import { getEvent, getPoll, getPollsByEvent, submitPollVotes, getQAsByEvent, submitPublicQuestion } from '../services/firestore';
+import { getPollBackupSheetName, getQaBackupSheetName, postToWebApp } from '../services/googleSheets';
 import type { Event, Poll, QandA } from '../types';
 
 type TabType = 'polls' | 'qa';
@@ -124,6 +124,29 @@ export default function PublicEventPage() {
       setError(null);
       await submitPollVotes(pollId, selectedOptions);
       setSubmittedPolls(prev => new Set([...prev, pollId]));
+      // Backup poll to sheet on user vote (in advance of operators)
+      const pollBackupEnabled =
+        event?.googleSheetWebAppUrl?.trim() &&
+        (event?.pollBackupSheetName?.trim() || (event?.pollBackupPerPoll && event?.pollBackupSheetPrefix?.trim()));
+      if (pollBackupEnabled) {
+        const updatedPoll = await getPoll(pollId);
+        if (updatedPoll) {
+          postToWebApp(
+            event!.googleSheetWebAppUrl!.trim(),
+            {
+              type: 'poll_backup',
+              sheetName: getPollBackupSheetName(event!, updatedPoll.id),
+              data: {
+                timestamp: new Date().toISOString(),
+                id: updatedPoll.id,
+                title: updatedPoll.title,
+                options: (updatedPoll.options || []).map(o => ({ text: o.text, votes: o.votes ?? 0 })),
+              },
+            },
+            event!.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '')
+          ).catch((err: unknown) => console.warn('Poll backup to sheet failed:', err));
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit vote');
     }
@@ -197,19 +220,28 @@ export default function PublicEventPage() {
         qaIsAnonymous[qaId] || false
       );
       setSubmittedQAs(prev => new Set([...prev, qaId]));
-      if (event?.googleSheetWebAppUrl?.trim() && event?.qaBackupSheetName?.trim()) {
-        postToWebApp(event.googleSheetWebAppUrl.trim(), {
-          type: 'qa_backup',
-          sheetName: event.qaBackupSheetName.trim(),
-          data: {
-            timestamp: new Date().toISOString(),
-            sessionId: qaId,
-            question,
-            submitterName: qaIsAnonymous[qaId] ? '' : (qaSubmitterNames[qaId]?.trim() || ''),
-            submitterEmail: qaIsAnonymous[qaId] ? '' : (email || ''),
-            status: 'pending',
+      const qaBackupEnabled =
+        event?.googleSheetWebAppUrl?.trim() &&
+        (event?.qaBackupSheetName?.trim() || (event?.qaBackupPerSession && event?.qaBackupSheetPrefix?.trim()));
+      if (qaBackupEnabled && event?.googleSheetWebAppUrl) {
+        const ev = event;
+        const webAppUrl = ev.googleSheetWebAppUrl!.trim();
+        postToWebApp(
+          webAppUrl,
+          {
+            type: 'qa_backup',
+            sheetName: getQaBackupSheetName(ev, qaId),
+            data: {
+              timestamp: new Date().toISOString(),
+              sessionId: qaId,
+              question,
+              submitterName: qaIsAnonymous[qaId] ? '' : (qaSubmitterNames[qaId]?.trim() || ''),
+              submitterEmail: qaIsAnonymous[qaId] ? '' : (email || ''),
+              status: 'pending',
+            },
           },
-        }).catch((err: unknown) => console.warn('Q&A backup to sheet failed:', err));
+          ev.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '')
+        ).catch((err: unknown) => console.warn('Q&A backup to sheet failed:', err));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit question');

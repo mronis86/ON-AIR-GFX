@@ -71,6 +71,41 @@ export const writePollToSheet = async (
 /** Default sub-sheet names to create in the spreadsheet when initializing. */
 export const DEFAULT_SHEET_NAMES = ['Events', 'Polls', 'WebLinks', 'InfoBars', 'Boxes', 'Q&A'] as const;
 
+/** Google Sheets tab names: no \ / ? * [ ]. Max 100 chars. */
+function sanitizeSheetName(name: string): string {
+  return name
+    .replace(/[\\/?*[\]]/g, '_')
+    .slice(0, 100);
+}
+
+/**
+ * Resolve Q&A backup sheet name: one sheet for event or one per session.
+ */
+export function getQaBackupSheetName(
+  event: { qaBackupSheetName?: string; qaBackupPerSession?: boolean; qaBackupSheetPrefix?: string },
+  sessionId: string
+): string {
+  if (event.qaBackupPerSession && (event.qaBackupSheetPrefix ?? 'QA').trim()) {
+    const prefix = (event.qaBackupSheetPrefix || 'QA').trim();
+    return sanitizeSheetName(prefix + '_' + sessionId);
+  }
+  return (event.qaBackupSheetName || '').trim() || 'QA_Submissions';
+}
+
+/**
+ * Resolve poll backup sheet name: one sheet for event or one per poll.
+ */
+export function getPollBackupSheetName(
+  event: { pollBackupSheetName?: string; pollBackupPerPoll?: boolean; pollBackupSheetPrefix?: string },
+  pollId: string
+): string {
+  if (event.pollBackupPerPoll && (event.pollBackupSheetPrefix ?? 'Poll').trim()) {
+    const prefix = (event.pollBackupSheetPrefix || 'Poll').trim();
+    return sanitizeSheetName(prefix + '_' + pollId);
+  }
+  return (event.pollBackupSheetName || '').trim() || 'Poll_Results';
+}
+
 /** Proxy URL for Google Web App (avoids CORS). Built from Firebase project when available. */
 function getSheetProxyUrl(): string {
   const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined;
@@ -81,19 +116,28 @@ function getSheetProxyUrl(): string {
 }
 
 /**
- * POST JSON to a Google Apps Script Web App URL. Uses Firebase proxy when available to avoid CORS.
+ * POST JSON to a Google Apps Script Web App URL.
+ * Uses a proxy when available to avoid CORS: pass Railway base URL (e.g. from event.railwayLiveCsvBaseUrl)
+ * or the app will use Firebase sheetProxy if configured; otherwise direct (may fail in browser).
  */
-export async function postToWebApp(webAppUrl: string, body: object): Promise<Response> {
+export async function postToWebApp(
+  webAppUrl: string,
+  body: object,
+  proxyBaseUrl?: string
+): Promise<Response> {
   const url = webAppUrl.trim();
   if (!url) throw new Error('Web App URL is required');
-  const proxy = getSheetProxyUrl();
+  const railwayProxy =
+    proxyBaseUrl && proxyBaseUrl.trim()
+      ? proxyBaseUrl.trim().replace(/\/+$/, '') + '/sheet-write'
+      : '';
+  const proxy = railwayProxy || getSheetProxyUrl();
   if (proxy) {
-    const res = await fetch(proxy, {
+    return fetch(proxy, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, body }),
     });
-    return res;
   }
   return fetch(url, {
     method: 'POST',

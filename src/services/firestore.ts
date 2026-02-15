@@ -118,9 +118,19 @@ export const updateEvent = async (eventId: string, updates: Partial<Event>): Pro
     if (updates.qaBackupSheetName) cleanUpdates.qaBackupSheetName = updates.qaBackupSheetName;
     else cleanUpdates.qaBackupSheetName = deleteField();
   }
+  if (updates.qaBackupPerSession !== undefined) cleanUpdates.qaBackupPerSession = updates.qaBackupPerSession;
+  if (updates.qaBackupSheetPrefix !== undefined) {
+    if (updates.qaBackupSheetPrefix) cleanUpdates.qaBackupSheetPrefix = updates.qaBackupSheetPrefix;
+    else cleanUpdates.qaBackupSheetPrefix = deleteField();
+  }
   if (updates.pollBackupSheetName !== undefined) {
     if (updates.pollBackupSheetName) cleanUpdates.pollBackupSheetName = updates.pollBackupSheetName;
     else cleanUpdates.pollBackupSheetName = deleteField();
+  }
+  if (updates.pollBackupPerPoll !== undefined) cleanUpdates.pollBackupPerPoll = updates.pollBackupPerPoll;
+  if (updates.pollBackupSheetPrefix !== undefined) {
+    if (updates.pollBackupSheetPrefix) cleanUpdates.pollBackupSheetPrefix = updates.pollBackupSheetPrefix;
+    else cleanUpdates.pollBackupSheetPrefix = deleteField();
   }
   if (updates.publicLink !== undefined) {
     if (updates.publicLink) {

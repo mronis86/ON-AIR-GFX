@@ -13,8 +13,16 @@ export interface Event {
   activeQACell?: string;
   /** Optional: sub-sheet to append all Q&A submissions (backup). One row per submission. */
   qaBackupSheetName?: string;
-  /** Optional: sub-sheet to append poll snapshots when a poll is played (backup). One row per snapshot. */
+  /** If true, use one sub-sheet per Q&A session (sheet name = qaBackupSheetPrefix + "_" + sessionId). */
+  qaBackupPerSession?: boolean;
+  /** Prefix for per-session Q&A backup sheets (e.g. "QA" → QA_abc123). Used when qaBackupPerSession is true. */
+  qaBackupSheetPrefix?: string;
+  /** Optional: sub-sheet to append poll snapshots (backup). One row per snapshot. */
   pollBackupSheetName?: string;
+  /** If true, use one sub-sheet per poll (sheet name = pollBackupSheetPrefix + "_" + pollId). */
+  pollBackupPerPoll?: boolean;
+  /** Prefix for per-poll backup sheets (e.g. "Poll" → Poll_xyz789). Used when pollBackupPerPoll is true. */
+  pollBackupSheetPrefix?: string;
   /** Base URL of Railway live-csv server (e.g. https://xxx.up.railway.app) for IMPORTDATA formula */
   railwayLiveCsvBaseUrl?: string;
   publicLink?: string; // Public link for event submissions

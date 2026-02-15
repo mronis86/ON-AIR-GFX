@@ -1,7 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getEvent, getQA, submitPublicQuestion } from '../services/firestore';
-import { postToWebApp } from '../services/googleSheets';
+import { getQaBackupSheetName, postToWebApp } from '../services/googleSheets';
 import type { QandA } from '../types';
 
 export default function PublicQAPage() {
@@ -87,19 +87,28 @@ export default function PublicQAPage() {
       setSubmitted(true);
       if (qa.eventId) {
         const eventData = await getEvent(qa.eventId);
-        if (eventData?.googleSheetWebAppUrl?.trim() && eventData?.qaBackupSheetName?.trim()) {
-          postToWebApp(eventData.googleSheetWebAppUrl.trim(), {
-            type: 'qa_backup',
-            sheetName: eventData.qaBackupSheetName.trim(),
-            data: {
-              timestamp: new Date().toISOString(),
-              sessionId: qaId,
-              question: question.trim(),
-              submitterName: isAnonymous ? '' : submitterName.trim(),
-              submitterEmail: isAnonymous ? '' : submitterEmail.trim(),
-              status: 'pending',
+        const qaBackupEnabled =
+          eventData?.googleSheetWebAppUrl?.trim() &&
+          (eventData?.qaBackupSheetName?.trim() || (eventData?.qaBackupPerSession && eventData?.qaBackupSheetPrefix?.trim()));
+        if (qaBackupEnabled && eventData?.googleSheetWebAppUrl) {
+          const ev = eventData;
+          const webAppUrl = ev.googleSheetWebAppUrl!.trim();
+          postToWebApp(
+            webAppUrl,
+            {
+              type: 'qa_backup',
+              sheetName: getQaBackupSheetName(ev, qaId!),
+              data: {
+                timestamp: new Date().toISOString(),
+                sessionId: qaId,
+                question: question.trim(),
+                submitterName: isAnonymous ? '' : submitterName.trim(),
+                submitterEmail: isAnonymous ? '' : submitterEmail.trim(),
+                status: 'pending',
+              },
             },
-          }).catch((err: unknown) => console.warn('Q&A backup to sheet failed:', err));
+            ev.railwayLiveCsvBaseUrl?.trim().replace(/\/+$/, '')
+          ).catch((err: unknown) => console.warn('Q&A backup to sheet failed:', err));
         }
       }
     } catch (err) {

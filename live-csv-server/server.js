@@ -13,6 +13,9 @@ const admin = require('firebase-admin');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// JSON body for sheet-write proxy
+app.use(express.json({ limit: '1mb' }));
+
 // Idle timeout: unsubscribe from event if no requests for this long
 const LISTENER_IDLE_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -246,8 +249,28 @@ app.get('/live-poll-csv', async (req, res) => {
   }
 });
 
+// Proxy POST to Google Apps Script Web App (avoids CORS when app calls from browser)
+app.post('/sheet-write', async (req, res) => {
+  const { url, body } = req.body || {};
+  if (!url || typeof body !== 'object') {
+    res.status(400).json({ ok: false, error: 'Missing url or body' });
+    return;
+  }
+  try {
+    const out = await fetch(String(url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await out.text();
+    res.status(out.status).set('Content-Type', 'application/json').send(text || '{}');
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err?.message || 'Proxy failed' });
+  }
+});
+
 app.get('/', (req, res) => {
-  res.send(`Live CSV server v${SERVER_VERSION}. Uses Firestore listeners - cache updates on change. GET /live-qa-csv?eventId=X or /live-poll-csv?eventId=X`);
+  res.send(`Live CSV server v${SERVER_VERSION}. Uses Firestore listeners - cache updates on change. GET /live-qa-csv?eventId=X or /live-poll-csv?eventId=X. POST /sheet-write to proxy Web App writes.`);
 });
 
 app.listen(PORT, () => {
