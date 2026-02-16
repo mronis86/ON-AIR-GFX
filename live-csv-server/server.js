@@ -171,11 +171,193 @@ setInterval(pruneIdleListeners, 5 * 60 * 1000); // Every 5 min
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, X-Api-Key, Authorization');
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
   next();
+});
+
+// --- Companion API (Bitfocus Companion): no API key – use Railway URL + Event ID only ---
+const EVENTS = 'events';
+const POLLS = 'polls';
+const QA = 'qa';
+const LIVE_STATE = 'liveState';
+
+app.get('/companion-api/events', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const snap = await db.collection(EVENTS).orderBy('date', 'desc').get();
+    const events = snap.docs.map((d) => ({ id: d.id, name: d.data().name, date: d.data().date }));
+    res.json(events);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.get('/companion-api/events/:eventId/polls', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const eventId = req.params.eventId;
+    const snap = await db.collection(POLLS).where('eventId', '==', eventId).get();
+    const polls = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        title: data.title,
+        isActive: data.isActive === true,
+        isActiveForPublic: data.isActiveForPublic === true,
+      };
+    });
+    res.json(polls);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.get('/companion-api/events/:eventId/qa', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const eventId = req.params.eventId;
+    const snap = await db.collection(QA).where('eventId', '==', eventId).get();
+    const sessions = [];
+    const questions = [];
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (data.name && !data.question) {
+        sessions.push({ id: d.id, name: data.name, isActiveForPublic: data.isActiveForPublic === true });
+      } else if (data.question) {
+        questions.push({
+          id: d.id,
+          sessionId: data.sessionId,
+          question: data.question,
+          isActive: data.isActive === true,
+          isNext: data.isNext === true,
+        });
+      }
+    });
+    res.json({ sessions, questions });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.post('/companion-api/events/:eventId/poll/:pollId/active', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { eventId, pollId } = req.params;
+    const active = req.body?.active === true || req.body?.active === 'true';
+    await db.collection(POLLS).doc(pollId).update({
+      isActive: active,
+      updatedAt: new Date().toISOString(),
+    });
+    if (!active) {
+      const liveRef = db.collection(LIVE_STATE).doc(eventId);
+      const live = (await liveRef.get()).data() || {};
+      if (live.csvSourcePollId === pollId) {
+        await liveRef.set({ ...live, csvSourcePollId: null, updatedAt: new Date() }, { merge: true });
+      }
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.post('/companion-api/events/:eventId/poll/:pollId/public', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { pollId } = req.params;
+    const pub = req.body?.public === true || req.body?.public === 'true';
+    await db.collection(POLLS).doc(pollId).update({
+      isActiveForPublic: pub,
+      updatedAt: new Date().toISOString(),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.post('/companion-api/events/:eventId/qa/:qaId/public', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { qaId } = req.params;
+    const pub = req.body?.public === true || req.body?.public === 'true';
+    await db.collection(QA).doc(qaId).update({
+      isActiveForPublic: pub,
+      updatedAt: new Date().toISOString(),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.post('/companion-api/events/:eventId/qa/question/:questionId/play', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { eventId, questionId } = req.params;
+    const qSnap = await db.collection(QA).doc(questionId).get();
+    if (!qSnap.exists) {
+      return res.status(404).json({ ok: false, error: 'Question not found' });
+    }
+    const sessionId = qSnap.data().sessionId;
+    const sessionSnap = sessionId ? await db.collection(QA).doc(sessionId).get() : null;
+    const outputSettings = sessionSnap?.data()?.outputSettings || { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
+    const batch = db.batch();
+    const allQ = await db.collection(QA).where('eventId', '==', eventId).get();
+    const now = new Date().toISOString();
+    allQ.docs.forEach((d) => {
+      if (d.id === questionId) {
+        batch.update(d.ref, { isActive: true, isQueued: false, isNext: false, outputSettings, updatedAt: now });
+      } else {
+        batch.update(d.ref, { isActive: false, updatedAt: now });
+      }
+    });
+    await batch.commit();
+    const question = qSnap.data();
+    await db.collection(LIVE_STATE).doc(eventId).set({
+      activeQA: { question: question.question, answer: question.answer, submitterName: question.submitterName },
+      csvSourceSessionId: sessionId || questionId,
+      updatedAt: new Date(),
+    }, { merge: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.post('/companion-api/events/:eventId/qa/question/:questionId/cue', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { eventId, questionId } = req.params;
+    const batch = db.batch();
+    const allQ = await db.collection(QA).where('eventId', '==', eventId).get();
+    const now = new Date().toISOString();
+    allQ.docs.forEach((d) => {
+      batch.update(d.ref, { isNext: d.id === questionId, updatedAt: now });
+    });
+    await batch.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.post('/companion-api/events/:eventId/qa/stop', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { eventId } = req.params;
+    const activeQ = await db.collection(QA).where('eventId', '==', eventId).where('isActive', '==', true).limit(1).get();
+    if (!activeQ.empty) {
+      await activeQ.docs[0].ref.update({ isActive: false, updatedAt: new Date().toISOString() });
+    }
+    await db.collection(LIVE_STATE).doc(eventId).set({ activeQA: null, updatedAt: new Date() }, { merge: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
 });
 
 app.get('/live-qa-csv', async (req, res) => {
@@ -312,7 +494,11 @@ app.post('/sheet-write', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send(`Live CSV server v${SERVER_VERSION}. Uses Firestore listeners - cache updates on change. GET /live-qa-csv?eventId=X or /live-poll-csv?eventId=X. POST /sheet-write to proxy Web App writes.`);
+  res.send(
+    `Live CSV server v${SERVER_VERSION}. Uses Firestore listeners - cache updates on change. ` +
+    `GET /live-qa-csv?eventId=X or /live-poll-csv?eventId=X. POST /sheet-write to proxy Web App writes. ` +
+    `Companion API base URL: ${req.protocol}://${req.get('host')}/companion-api (use with Event ID in Companion module)`
+  );
 });
 
 app.listen(PORT, () => {
