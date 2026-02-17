@@ -199,6 +199,8 @@ app.get('/companion-api/events/:eventId/polls', async (req, res) => {
   if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
   try {
     const eventId = req.params.eventId;
+    const liveSnap = await db.collection(LIVE_STATE).doc(eventId).get();
+    const csvSourcePollId = (liveSnap.exists && liveSnap.data()) ? liveSnap.data().csvSourcePollId || null : null;
     const snap = await db.collection(POLLS).where('eventId', '==', eventId).get();
     const polls = snap.docs.map((d) => {
       const data = d.data();
@@ -207,6 +209,7 @@ app.get('/companion-api/events/:eventId/polls', async (req, res) => {
         title: data.title,
         isActive: data.isActive === true,
         isActiveForPublic: data.isActiveForPublic === true,
+        isCsvSource: d.id === csvSourcePollId,
       };
     });
     res.json(polls);
@@ -219,24 +222,107 @@ app.get('/companion-api/events/:eventId/qa', async (req, res) => {
   if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
   try {
     const eventId = req.params.eventId;
+    const liveSnap = await db.collection(LIVE_STATE).doc(eventId).get();
+    const csvSourceSessionId = (liveSnap.exists && liveSnap.data()) ? liveSnap.data().csvSourceSessionId || null : null;
     const snap = await db.collection(QA).where('eventId', '==', eventId).get();
     const sessions = [];
     const questions = [];
     snap.docs.forEach((d) => {
       const data = d.data();
       if (data.name && !data.question) {
-        sessions.push({ id: d.id, name: data.name, isActiveForPublic: data.isActiveForPublic === true });
+        sessions.push({
+          id: d.id,
+          name: data.name,
+          isActiveForPublic: data.isActiveForPublic === true,
+          isCsvSource: d.id === csvSourceSessionId,
+        });
       } else if (data.question) {
         questions.push({
           id: d.id,
           sessionId: data.sessionId,
           question: data.question,
+          submitterName: data.submitterName || null,
           isActive: data.isActive === true,
           isNext: data.isNext === true,
         });
       }
     });
     res.json({ sessions, questions });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.post('/companion-api/events/:eventId/qa/csv-source', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { eventId } = req.params;
+    const sessionId = req.body?.sessionId || null;
+    await db.collection(LIVE_STATE).doc(eventId).set(
+      { csvSourceSessionId: sessionId, updatedAt: new Date() },
+      { merge: true }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+app.post('/companion-api/events/:eventId/qa/session/:sessionId/play-next', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { eventId, sessionId } = req.params;
+    const qaSnap = await db.collection(QA).where('eventId', '==', eventId).get();
+    const questionsInSession = qaSnap.docs
+      .filter((d) => {
+        const data = d.data();
+        return data.question && (data.sessionId === sessionId || d.id === sessionId);
+      })
+      .map((d) => ({ id: d.id, ref: d.ref, data: d.data() }));
+    let questionToPlay = questionsInSession.find((q) => q.data.isNext === true);
+    if (!questionToPlay) {
+      questionToPlay = questionsInSession.find((q) => q.data.isActive !== true);
+    }
+    if (!questionToPlay) {
+      return res.status(404).json({ ok: false, error: 'No question to play in this session' });
+    }
+    const questionId = questionToPlay.id;
+    const qSnap = await db.collection(QA).doc(questionId).get();
+    const outputSettings = (await db.collection(QA).doc(sessionId).get()).data()?.outputSettings || { fullScreen: [1], lowerThird: [1], pip: [1], splitScreen: [1] };
+    const batch = db.batch();
+    const allQ = await db.collection(QA).where('eventId', '==', eventId).get();
+    const now = new Date().toISOString();
+    allQ.docs.forEach((d) => {
+      if (d.id === questionId) {
+        batch.update(d.ref, { isActive: true, isQueued: false, isNext: false, outputSettings, updatedAt: now });
+      } else {
+        batch.update(d.ref, { isActive: false, updatedAt: now });
+      }
+    });
+    await batch.commit();
+    const question = qSnap.data();
+    await db.collection(LIVE_STATE).doc(eventId).set({
+      activeQA: { question: question.question, answer: question.answer, submitterName: question.submitterName },
+      csvSourceSessionId: sessionId,
+      updatedAt: new Date(),
+    }, { merge: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+// CSV only: which poll feeds the CSV (does not change poll active state). Must be before /poll/:pollId/active.
+app.post('/companion-api/events/:eventId/poll/csv-source', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { eventId } = req.params;
+    const pollId = req.body?.pollId || null;
+    await db.collection(LIVE_STATE).doc(eventId).set(
+      { csvSourcePollId: pollId, updatedAt: new Date() },
+      { merge: true }
+    );
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message });
   }
@@ -251,12 +337,10 @@ app.post('/companion-api/events/:eventId/poll/:pollId/active', async (req, res) 
       isActive: active,
       updatedAt: new Date().toISOString(),
     });
-    if (!active) {
-      const liveRef = db.collection(LIVE_STATE).doc(eventId);
-      const live = (await liveRef.get()).data() || {};
-      if (live.csvSourcePollId === pollId) {
-        await liveRef.set({ ...live, csvSourcePollId: null, updatedAt: new Date() }, { merge: true });
-      }
+    const liveRef = db.collection(LIVE_STATE).doc(eventId);
+    const live = (await liveRef.get()).data() || {};
+    if (!active && live.csvSourcePollId === pollId) {
+      await liveRef.set({ ...live, csvSourcePollId: null, updatedAt: new Date() }, { merge: true });
     }
     res.json({ ok: true });
   } catch (err) {
@@ -273,6 +357,22 @@ app.post('/companion-api/events/:eventId/poll/:pollId/public', async (req, res) 
       isActiveForPublic: pub,
       updatedAt: new Date().toISOString(),
     });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+// Must be before /qa/:qaId/public so "stop" is not matched as qaId
+app.post('/companion-api/events/:eventId/qa/stop', async (req, res) => {
+  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
+  try {
+    const { eventId } = req.params;
+    const activeQ = await db.collection(QA).where('eventId', '==', eventId).where('isActive', '==', true).limit(1).get();
+    if (!activeQ.empty) {
+      await activeQ.docs[0].ref.update({ isActive: false, updatedAt: new Date().toISOString() });
+    }
+    await db.collection(LIVE_STATE).doc(eventId).set({ activeQA: null, updatedAt: new Date() }, { merge: true });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message });
@@ -339,21 +439,6 @@ app.post('/companion-api/events/:eventId/qa/question/:questionId/cue', async (re
       batch.update(d.ref, { isNext: d.id === questionId, updatedAt: now });
     });
     await batch.commit();
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err?.message });
-  }
-});
-
-app.post('/companion-api/events/:eventId/qa/stop', async (req, res) => {
-  if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
-  try {
-    const { eventId } = req.params;
-    const activeQ = await db.collection(QA).where('eventId', '==', eventId).where('isActive', '==', true).limit(1).get();
-    if (!activeQ.empty) {
-      await activeQ.docs[0].ref.update({ isActive: false, updatedAt: new Date().toISOString() });
-    }
-    await db.collection(LIVE_STATE).doc(eventId).set({ activeQA: null, updatedAt: new Date() }, { merge: true });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message });
