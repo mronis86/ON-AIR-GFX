@@ -1,0 +1,21 @@
+{
+  "id": "on-air-gfx",
+  "name": "ON-AIR-GFX",
+  "shortname": "onairgfx",
+  "description": "Control ON-AIR-GFX polls, Q&A and public toggles via Companion API",
+  "version": "1.0.0",
+  "license": "MIT",
+  "repository": "https://github.com/bitfocus/companion-module-on-air-gfx",
+  "bugs": "https://github.com/bitfocus/companion-module-on-air-gfx/issues",
+  "maintainers": [{"name": "ON-AIR-GFX", "email": ""}],
+  "runtime": {
+    "type": "node18",
+    "api": "nodejs-ipc",
+    "apiVersion": "0.0.0",
+    "entrypoint": "../src/main.js"
+  },
+  "legacyIds": [],
+  "manufacturer": "ON-AIR-GFX",
+  "products": ["ON-AIR-GFX"],
+  "keywords": ["poll", "qa", "graphics", "broadcast"]
+}

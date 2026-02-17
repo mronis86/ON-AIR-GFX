@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAllEvents, getEvent, getPollsByEvent, getQAsByEvent, getLiveState, updatePoll, updateQA, setLiveState, subscribePollsByEvent, subscribeQAsByEvent } from '../services/firestore';
+import { getAllEvents, getEvent, getPollsByEvent, getQAsByEvent, getLiveState, updatePoll, updateQA, setLiveState, subscribePollsByEvent, subscribeQAsByEvent, subscribeLiveState } from '../services/firestore';
 import type { Event, Poll, QandA } from '../types';
 import PollDisplay from '../components/PollDisplay';
 import QADisplay from '../components/QADisplay';
@@ -89,6 +89,13 @@ export default function OperatorsPage() {
   const [previewOutput, setPreviewOutput] = useState<number>(1); // Output 1-4 for preview
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0); // Increment to force iframe reload
   const [windowSize, setWindowSize] = useState({ w: typeof window !== 'undefined' ? window.innerWidth : 1920, h: typeof window !== 'undefined' ? window.innerHeight : 1080 });
+  const [embedFlagLabel, setEmbedFlagLabel] = useState('Live Q&A & Polls');
+  const [embedButtonBg, setEmbedButtonBg] = useState('#2563eb');
+  const [embedButtonText, setEmbedButtonText] = useState('#ffffff');
+  const [embedHeaderBg, setEmbedHeaderBg] = useState('#1e40af');
+  const [embedHeaderText, setEmbedHeaderText] = useState('#ffffff');
+  const [showEmbedSettingsMenu, setShowEmbedSettingsMenu] = useState(false);
+  const embedMenuRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -96,6 +103,17 @@ export default function OperatorsPage() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    if (!showEmbedSettingsMenu) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (embedMenuRef.current && !embedMenuRef.current.contains(e.target as Node)) {
+        setShowEmbedSettingsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showEmbedSettingsMenu]);
 
   // Preview size constrained to viewport, keeping 16:9
   const previewConstrained = (() => {
@@ -368,11 +386,11 @@ export default function OperatorsPage() {
       });
     }
 
-    const pollBackupEnabled = selectedEvent?.googleSheetWebAppUrl?.trim();
-    if (activePoll && selectedEvent && pollBackupEnabled) {
+    const pollBackupSheet = activePoll && selectedEvent ? getPollBackupSheetName(selectedEvent, activePoll.id) : '';
+    if (activePoll && selectedEvent && selectedEvent.googleSheetWebAppUrl?.trim() && pollBackupSheet) {
       post({
         type: 'poll_backup',
-        sheetName: getPollBackupSheetName(selectedEvent, activePoll.id),
+        sheetName: pollBackupSheet,
         data: {
           timestamp: new Date().toISOString(),
           id: activePoll.id,
@@ -383,17 +401,21 @@ export default function OperatorsPage() {
     }
 
     if (selectedEvent && selectedEvent.activeQASheetName?.trim() && selectedEvent.activeQACell?.trim()) {
+      const sessionQuestions = csvSourceSessionId
+        ? qaQuestions.filter((q) => q.sessionId === csvSourceSessionId)
+        : qaQuestions;
+      const activeQ = sessionQuestions.find((q) => q.isActive) ?? null;
+      const cueQ = sessionQuestions.find((q) => q.isQueued) ?? null;
+      const nextQ = sessionQuestions.find((q) => q.isNext) ?? null;
       post({
         type: 'qa_active',
         sheetName: selectedEvent.activeQASheetName.trim(),
         cell: selectedEvent.activeQACell.trim(),
-        data: activeQA
-          ? {
-              question: activeQA.question,
-              answer: activeQA.answer ?? '',
-              submitterName: activeQA.submitterName ?? '',
-            }
-          : { question: '', answer: '', submitterName: '' },
+        data: {
+          active: activeQ ? { question: activeQ.question ?? '', submitterName: activeQ.submitterName ?? '' } : null,
+          cue: cueQ ? { question: cueQ.question ?? '', submitterName: cueQ.submitterName ?? '' } : null,
+          next: nextQ ? { question: nextQ.question ?? '', submitterName: nextQ.submitterName ?? '' } : null,
+        },
       });
     }
   }, [
@@ -401,16 +423,13 @@ export default function OperatorsPage() {
     selectedEvent?.googleSheetWebAppUrl,
     selectedEvent?.activeQASheetName,
     selectedEvent?.activeQACell,
-    selectedEvent?.pollBackupSheetName,
     selectedEvent?.pollBackupSheetNames,
     activePoll?.id,
     activePoll?.title,
     activePoll?.googleSheetTab,
     activePoll?.options,
-    activeQA?.id,
-    activeQA?.question,
-    activeQA?.answer,
-    activeQA?.submitterName,
+    csvSourceSessionId,
+    qaQuestions,
   ]);
 
   // Subscribe to Q&A - updates only when data changes (no polling, fewer Firestore reads)
@@ -456,6 +475,16 @@ export default function OperatorsPage() {
     });
     return () => unsub();
   }, [selectedEventId, activePoll?.id]);
+
+  // Subscribe to liveState so CSV source (and active output) updates when Companion changes it
+  useEffect(() => {
+    if (!selectedEventId) return;
+    const unsub = subscribeLiveState(selectedEventId, (liveState) => {
+      setCsvSourceSessionId(liveState?.csvSourceSessionId ?? null);
+      setCsvSourcePollId(liveState?.csvSourcePollId ?? null);
+    });
+    return () => unsub();
+  }, [selectedEventId]);
 
   const loadEvents = async () => {
     try {
@@ -618,25 +647,12 @@ export default function OperatorsPage() {
         setPolls(eventPolls);
         setActivePoll(null);
       }
-      // Check if there's a Cued question - if so, activate it instead of the session
+      // Single state: Play only makes the Cued question go live (no separate session active)
       const cuedQuestion = qaQuestions.find(q => q.isQueued);
       if (cuedQuestion) {
-        // Activate the Cued question (changes Cue -> Active)
         await handlePlayQuestion(cuedQuestion.id);
       } else {
-        // No Cued question, activate the Q&A session as before
-        await updateQA(qaId, {
-          isActive: true,
-        });
-
-        // Reload Q&As
-        if (selectedEventId) {
-          const eventQAs = await getQAsByEvent(selectedEventId);
-          const qaSessions = eventQAs.filter(qa => qa.name && !qa.question);
-          const qaSubmissions = eventQAs.filter(qa => qa.question && !qa.name);
-          setQAs(qaSessions);
-          setQAQuestions(qaSubmissions);
-        }
+        setError('Set a question to Cue first (in Moderation), then click Play to show it.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to activate Q&A');
@@ -701,36 +717,13 @@ export default function OperatorsPage() {
     }
   };
 
-  const handleDeactivateQA = async (qaId: string) => {
+  const handleDeactivateQA = async (_qaId: string) => {
     try {
-      // Check if there's an Active question - if so, stop it (changes Active -> Done)
       const activeQuestion = qaQuestions.find(q => q.isActive);
       if (activeQuestion) {
-        // Stop the Active question (changes Active -> Done, promotes Next -> Cue)
         await handleStopQuestion(activeQuestion.id);
       } else {
-        // No Active question, deactivate the Q&A session as before
-        setPreviewVisible(false);
-        setTimeout(async () => {
-          await updateQA(qaId, {
-            isActive: false,
-          });
-
-          // Reload Q&As
-          if (selectedEventId) {
-            const eventQAs = await getQAsByEvent(selectedEventId);
-            const qaSessions = eventQAs.filter(qa => qa.name && !qa.question);
-            const qaSubmissions = eventQAs.filter(qa => qa.question && !qa.name);
-            setQAs(qaSessions);
-            setQAQuestions(qaSubmissions);
-            
-            // Clear preview if this was the active Q&A
-            const active = qaSessions.find((q) => q.isActive);
-            if (!active) {
-              setActiveQA(null);
-            }
-          }
-        }, 500); // Wait for animation to complete
+        setError('No question is currently live. Play a Cued question first.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to deactivate Q&A');
@@ -857,24 +850,16 @@ export default function OperatorsPage() {
           }).catch((err: unknown) => console.warn('Live state write failed:', err));
         }
 
-        // Find the Next question and promote it to Cue
+        // Promote Next to Cue so the next question is ready to play
         if (selectedEventId) {
           const eventQAs = await getQAsByEvent(selectedEventId);
           const qaSubmissions = eventQAs.filter(qa => qa.question && !qa.name);
           const nextQuestion = qaSubmissions.find(q => q.isNext);
-          
           if (nextQuestion) {
-            // Promote Next to Cue
-            await updateQA(nextQuestion.id, {
-              isNext: false,
-              isQueued: true,
-            });
+            await updateQA(nextQuestion.id, { isNext: false, isQueued: true });
           }
-
-          // Reload Q&A questions
           const updatedQAs = await getQAsByEvent(selectedEventId);
-          const updatedSubmissions = updatedQAs.filter(qa => qa.question && !qa.name);
-          setQAQuestions(updatedSubmissions);
+          setQAQuestions(updatedQAs.filter(qa => qa.question && !qa.name));
         }
       }, 500); // Wait for animation to complete
     } catch (err) {
@@ -1016,13 +1001,34 @@ export default function OperatorsPage() {
     
     try {
       await navigator.clipboard.writeText(publicLink);
-      // Show success message
       setError(null);
-      // You could add a toast notification here if desired
       alert('Public link copied to clipboard!');
     } catch (err) {
       setError('Failed to copy link to clipboard');
       console.error('Error copying link:', err);
+    }
+  };
+
+  const handleCopyEmbedCode = async () => {
+    if (!selectedEventId) return;
+    const origin = window.location.origin;
+    const flagLabelAttr = embedFlagLabel.replace(/"/g, '&quot;');
+    const attrs = [
+      `data-event-id="${selectedEventId}"`,
+      `data-flag-label="${flagLabelAttr}"`,
+      `data-button-bg="${embedButtonBg}"`,
+      `data-button-text="${embedButtonText}"`,
+      `data-header-bg="${embedHeaderBg}"`,
+      `data-header-text="${embedHeaderText}"`,
+    ].join(' ');
+    const snippet = `<script src="${origin}/embed.js" ${attrs}></script>`;
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setError(null);
+      alert('Embed code copied! Paste it on your website to show a Live QA widget.');
+    } catch (err) {
+      setError('Failed to copy embed code');
+      console.error('Error copying embed code:', err);
     }
   };
 
@@ -1231,6 +1237,57 @@ export default function OperatorsPage() {
                   </svg>
                   Copy Public Link
                 </button>
+                <div className="relative flex items-center gap-1" ref={embedMenuRef}>
+                  <button
+                    onClick={handleCopyEmbedCode}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                    title="Copy embed code for your website"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                    </svg>
+                    Copy Embed Code
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowEmbedSettingsMenu((v) => !v)}
+                    className="p-2 rounded-lg border border-gray-600 bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+                    title="Embed settings"
+                    aria-expanded={showEmbedSettingsMenu}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 2.31.826 1.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 2.31-2.37 1.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-2.31-.826-1.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-2.31 2.37-1.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
+                  {showEmbedSettingsMenu && (
+                    <div className="absolute right-0 top-full mt-1 z-[100] w-72 p-3 bg-gray-800 border border-gray-600 rounded-lg shadow-xl">
+                      <p className="text-sm font-medium text-gray-200 mb-2">Embed settings</p>
+                      <div className="space-y-2">
+                        <label className="block text-sm text-gray-300">
+                          <span className="block mb-1">Flag label</span>
+                          <input type="text" value={embedFlagLabel} onChange={(e) => setEmbedFlagLabel(e.target.value)} placeholder="Live Q&A & Polls" className="w-full px-2 py-1.5 border border-gray-500 rounded bg-gray-700 text-gray-100" />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 text-sm text-gray-300">
+                          <span>Flag background</span>
+                          <input type="color" value={embedButtonBg} onChange={(e) => setEmbedButtonBg(e.target.value)} className="w-8 h-8 rounded border border-gray-500 cursor-pointer" />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 text-sm text-gray-300">
+                          <span>Flag text</span>
+                          <input type="color" value={embedButtonText} onChange={(e) => setEmbedButtonText(e.target.value)} className="w-8 h-8 rounded border border-gray-500 cursor-pointer" />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 text-sm text-gray-300">
+                          <span>Header background</span>
+                          <input type="color" value={embedHeaderBg} onChange={(e) => setEmbedHeaderBg(e.target.value)} className="w-8 h-8 rounded border border-gray-500 cursor-pointer" />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 text-sm text-gray-300">
+                          <span>Header text</span>
+                          <input type="color" value={embedHeaderText} onChange={(e) => setEmbedHeaderText(e.target.value)} className="w-8 h-8 rounded border border-gray-500 cursor-pointer" />
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={() => setShowOutputOptions(true)}
                   className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
@@ -2291,11 +2348,13 @@ export default function OperatorsPage() {
                               <p className="text-gray-500 text-sm">No Q&A sessions for this event</p>
                             ) : (
                               <div className="space-y-3">
-                              {qas.map((qa) => (
+                              {qas.map((qa) => {
+                                const hasActiveQuestion = qaQuestions.some((q) => q.sessionId === qa.id && q.isActive);
+                                return (
                                 <div
                                   key={qa.id}
                                   className={`p-4 rounded-lg border-2 transition-all ${
-                                    qa.isActive
+                                    hasActiveQuestion
                                       ? 'border-green-500 bg-green-900/20'
                                       : 'border-gray-600 bg-gray-700/50'
                                   }`}
@@ -2333,22 +2392,18 @@ export default function OperatorsPage() {
                                       {/* Play button - always visible */}
                                       <button
                                         onClick={() => handleActivateQA(qa.id)}
-                                        className={`p-3 rounded-lg transition-colors ${
-                                          qa.isActive
-                                            ? 'bg-green-700 hover:bg-green-600'
-                                            : 'bg-green-600 hover:bg-green-700'
-                                        }`}
-                                        title="Play (Animate In)"
+                                        className="p-3 rounded-lg transition-colors bg-green-600 hover:bg-green-700"
+                                        title="Play Cued question (set Cue in Moderation first)"
                                       >
                                         <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
                                           <path d="M8 5v14l11-7z"/>
                                         </svg>
                                       </button>
-                                      {/* Stop button - always visible */}
+                                      {/* Stop button - stops the active question */}
                                       <button
                                         onClick={() => handleDeactivateQA(qa.id)}
                                         className={`p-3 rounded-lg transition-colors ${
-                                          qa.isActive
+                                          hasActiveQuestion
                                             ? 'bg-red-600 hover:bg-red-700'
                                             : 'bg-red-700 hover:bg-red-600'
                                         }`}
@@ -2523,7 +2578,8 @@ export default function OperatorsPage() {
                                     )}
                                   </div>
                                 </div>
-                              ))}
+                              );
+                              })}
                             </div>
                             )}
                           </>

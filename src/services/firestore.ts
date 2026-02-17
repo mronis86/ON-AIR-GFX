@@ -50,6 +50,14 @@ export const getLiveState = async (eventId: string): Promise<LiveStateData | nul
   return snap.exists() ? (snap.data() as LiveStateData) : null;
 };
 
+/** Subscribe to liveState for an event so CSV source and other fields update when changed (e.g. by Companion). */
+export const subscribeLiveState = (eventId: string, callback: (data: LiveStateData | null) => void): Unsubscribe => {
+  const ref = doc(db, liveStateCollection, eventId);
+  return onSnapshot(ref, (snap) => {
+    callback(snap.exists() ? (snap.data() as LiveStateData) : null);
+  });
+};
+
 // Event Operations
 export const createEvent = async (eventData: Omit<Event, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {
   const now = new Date().toISOString();
@@ -114,20 +122,12 @@ export const updateEvent = async (eventId: string, updates: Partial<Event>): Pro
     if (updates.activeQACell) cleanUpdates.activeQACell = updates.activeQACell;
     else cleanUpdates.activeQACell = deleteField();
   }
-  if (updates.qaBackupSheetName !== undefined) {
-    if (updates.qaBackupSheetName) cleanUpdates.qaBackupSheetName = updates.qaBackupSheetName;
-    else cleanUpdates.qaBackupSheetName = deleteField();
-  }
   if (updates.qaBackupSheetNames !== undefined) {
     if (updates.qaBackupSheetNames && Object.keys(updates.qaBackupSheetNames).length > 0) {
       cleanUpdates.qaBackupSheetNames = updates.qaBackupSheetNames;
     } else {
       cleanUpdates.qaBackupSheetNames = deleteField();
     }
-  }
-  if (updates.pollBackupSheetName !== undefined) {
-    if (updates.pollBackupSheetName) cleanUpdates.pollBackupSheetName = updates.pollBackupSheetName;
-    else cleanUpdates.pollBackupSheetName = deleteField();
   }
   if (updates.pollBackupSheetNames !== undefined) {
     if (updates.pollBackupSheetNames && Object.keys(updates.pollBackupSheetNames).length > 0) {
@@ -148,6 +148,13 @@ export const updateEvent = async (eventId: string, updates: Partial<Event>): Pro
       cleanUpdates.railwayLiveCsvBaseUrl = updates.railwayLiveCsvBaseUrl;
     } else {
       cleanUpdates.railwayLiveCsvBaseUrl = deleteField();
+    }
+  }
+  if (updates.testWriteSheetName !== undefined) {
+    if (updates.testWriteSheetName && String(updates.testWriteSheetName).trim()) {
+      cleanUpdates.testWriteSheetName = String(updates.testWriteSheetName).trim();
+    } else {
+      cleanUpdates.testWriteSheetName = deleteField();
     }
   }
 

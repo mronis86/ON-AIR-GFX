@@ -303,7 +303,6 @@ app.post('/companion-api/events/:eventId/qa/session/:sessionId/play-next', async
     const question = qSnap.data();
     await db.collection(LIVE_STATE).doc(eventId).set({
       activeQA: { question: question.question, answer: question.answer, submitterName: question.submitterName },
-      csvSourceSessionId: sessionId,
       updatedAt: new Date(),
     }, { merge: true });
     res.json({ ok: true });
@@ -419,7 +418,6 @@ app.post('/companion-api/events/:eventId/qa/question/:questionId/play', async (r
     const question = qSnap.data();
     await db.collection(LIVE_STATE).doc(eventId).set({
       activeQA: { question: question.question, answer: question.answer, submitterName: question.submitterName },
-      csvSourceSessionId: sessionId || questionId,
       updatedAt: new Date(),
     }, { merge: true });
     res.json({ ok: true });
