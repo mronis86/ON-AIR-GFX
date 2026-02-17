@@ -125,7 +125,7 @@ class OnAirGfxInstance extends InstanceBase {
 	startPolling() {
 		if (this.pollInterval) clearInterval(this.pollInterval);
 		this.pollInterval = null;
-		const seconds = Math.max(10, Math.min(120, parseInt(this.config?.pollIntervalSeconds, 10) || 30));
+		const seconds = Math.max(10, Math.min(120, parseInt(this.config?.pollIntervalSeconds, 10) || 15));
 		const self = this;
 		this.pollInterval = setInterval(function tick() {
 			if (!self.config?.eventId) return;
@@ -180,7 +180,7 @@ class OnAirGfxInstance extends InstanceBase {
 				id: 'pollIntervalSeconds',
 				label: 'Poll interval (seconds)',
 				width: 6,
-				default: 30,
+				default: 15,
 				min: 10,
 				max: 120,
 			},
@@ -208,6 +208,7 @@ class OnAirGfxInstance extends InstanceBase {
 			'has_active_poll',
 			'has_active_question',
 			'has_cued_question',
+			'has_next_question',
 			'has_active_or_cued_question'
 		);
 	}

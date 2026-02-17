@@ -305,9 +305,20 @@ module.exports = function (self) {
 					} else {
 						await self.apiPost(`events/${eventId}/qa/stop`);
 					}
+					// Refetch after short delay so Firestore/API has updated
+					await new Promise((r) => setTimeout(r, 600));
 					await self.fetchQa(eventId);
 					self.updateVariableValues();
 					self.checkAllFeedbacks();
+					// Second refetch in case first was still stale (slow propagation)
+					setTimeout(async () => {
+						if (!self.config?.eventId) return;
+						try {
+							await self.fetchQa(self.config.eventId);
+							self.updateVariableValues();
+							self.checkAllFeedbacks();
+						} catch (_) {}
+					}, 1200);
 					self.log('info', turnOn ? 'Q&A output on (play)' : 'Q&A output off (stop)');
 				} catch (err) {
 					self.log('error', err.message);
