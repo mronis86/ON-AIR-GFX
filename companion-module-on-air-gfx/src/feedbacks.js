@@ -121,12 +121,12 @@ module.exports = async function (self) {
 				},
 			],
 			callback: (feedback) => {
-				const q = self.qaQuestions.find((x) => x.id === feedback.options.questionId);
-				return q ? q.isActive === true : false;
+				const q = (self.qaQuestions || []).find((x) => x && x.id === feedback.options.questionId);
+				return !!(q && (q.isActive === true || q.isActive === 'true'));
 			},
 		},
 		question_cued: {
-			name: 'Question is cued (next)',
+			name: 'Question is cued (ready to play)',
 			type: 'boolean',
 			label: 'Question cued',
 			defaultStyle: { bgcolor: combineRgb(180, 120, 0), color: combineRgb(255, 255, 255) },
@@ -140,8 +140,8 @@ module.exports = async function (self) {
 				},
 			],
 			callback: (feedback) => {
-				const q = self.qaQuestions.find((x) => x.id === feedback.options.questionId);
-				return q ? q.isNext === true : false;
+				const q = (self.qaQuestions || []).find((x) => x && x.id === feedback.options.questionId);
+				return !!(q && (q.isQueued === true || q.isQueued === 'true'));
 			},
 		},
 		has_active_poll: {
@@ -158,15 +158,23 @@ module.exports = async function (self) {
 			label: 'Has active question',
 			defaultStyle: { bgcolor: combineRgb(0, 100, 0), color: combineRgb(255, 255, 255) },
 			options: [],
-			callback: () => self.qaQuestions.some((q) => q.isActive === true),
+			callback: () => !!((self.qaQuestions || []).some((q) => q && (q.isActive === true || q.isActive === 'true'))),
 		},
 		has_cued_question: {
-			name: 'Any Q&A question is cued (next)',
+			name: 'Any Q&A question is cued (ready to play)',
 			type: 'boolean',
-			label: 'Has cued question (NEXT)',
+			label: 'Has cued question',
+			defaultStyle: { bgcolor: combineRgb(180, 120, 0), color: combineRgb(255, 255, 255) },
+			options: [],
+			callback: () => !!((self.qaQuestions || []).some((q) => q && (q.isQueued === true || q.isQueued === 'true' || !!q.isQueued))),
+		},
+		has_next_question: {
+			name: 'Any Q&A question is next (in line)',
+			type: 'boolean',
+			label: 'Has next question',
 			defaultStyle: { bgcolor: combineRgb(148, 0, 211), color: combineRgb(255, 255, 255) },
 			options: [],
-			callback: () => self.qaQuestions.some((q) => q.isNext === true),
+			callback: () => !!((self.qaQuestions || []).some((q) => q && (q.isNext === true || q.isNext === 'true'))),
 		},
 		has_active_or_cued_question: {
 			name: 'Any Q&A question is ACTIVE (live) or CUE (cued)',
@@ -175,7 +183,10 @@ module.exports = async function (self) {
 			defaultStyle: { bgcolor: combineRgb(0, 100, 0), color: combineRgb(255, 255, 255) },
 			options: [],
 			callback: () =>
-				self.qaQuestions.some((q) => q.isActive === true || q.isNext === true),
+				!!((self.qaQuestions || []).some((q) => q && (
+					q.isActive === true || q.isActive === 'true' || !!q.isActive ||
+					q.isQueued === true || q.isQueued === 'true' || !!q.isQueued
+				))),
 		},
 	});
 };

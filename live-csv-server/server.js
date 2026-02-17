@@ -242,8 +242,9 @@ app.get('/companion-api/events/:eventId/qa', async (req, res) => {
           sessionId: data.sessionId,
           question: data.question,
           submitterName: data.submitterName || null,
-          isActive: data.isActive === true,
-          isNext: data.isNext === true,
+          isActive: !!data.isActive,
+          isNext: !!data.isNext,
+          isQueued: !!data.isQueued,
         });
       }
     });

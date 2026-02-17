@@ -308,6 +308,7 @@ module.exports = function (self) {
 					// Refetch after short delay so Firestore/API has updated
 					await new Promise((r) => setTimeout(r, 600));
 					await self.fetchQa(eventId);
+					self.updateActions();
 					self.updateVariableValues();
 					self.checkAllFeedbacks();
 					// Second refetch in case first was still stale (slow propagation)
@@ -315,6 +316,7 @@ module.exports = function (self) {
 						if (!self.config?.eventId) return;
 						try {
 							await self.fetchQa(self.config.eventId);
+							self.updateActions();
 							self.updateVariableValues();
 							self.checkAllFeedbacks();
 						} catch (_) {}

@@ -118,15 +118,15 @@ module.exports = function (self) {
 		};
 	});
 
-	// --- Q&A - Question states: ACTIVE/CUE = two feedbacks (dark green when active, orange when cued). NEXT = purple. ---
+	// --- Q&A - Question states: ACTIVE/CUE = CUE first (orange), then ACTIVE (green). NEXT = purple (isNext). ---
 	presets.qa_state_active_cue = {
 		type: 'button',
 		category: 'Q&A - Question states',
 		name: 'ACTIVE/CUE',
 		style: { text: 'ACTIVE/CUE', size: '18', color: white, bgcolor: gray },
 		feedbacks: [
-			{ feedbackId: 'has_active_question', options: {}, style: { bgcolor: darkGreen, color: white } },
 			{ feedbackId: 'has_cued_question', options: {}, style: { bgcolor: orange, color: white } },
+			{ feedbackId: 'has_active_question', options: {}, style: { bgcolor: darkGreen, color: white } },
 		],
 		steps: [{ down: [], up: [] }],
 	};
@@ -135,7 +135,7 @@ module.exports = function (self) {
 		category: 'Q&A - Question states',
 		name: 'NEXT',
 		style: { text: 'NEXT', size: '18', color: white, bgcolor: gray },
-		feedbacks: [{ feedbackId: 'has_cued_question', options: {}, style: { bgcolor: purple, color: white } }],
+		feedbacks: [{ feedbackId: 'has_next_question', options: {}, style: { bgcolor: purple, color: white } }],
 		steps: [{ down: [], up: [] }],
 	};
 
