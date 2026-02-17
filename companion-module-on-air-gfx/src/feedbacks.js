@@ -110,7 +110,7 @@ module.exports = async function (self) {
 			name: 'Question is live',
 			type: 'boolean',
 			label: 'Question active',
-			defaultStyle: { bgcolor: combineRgb(0, 160, 0), color: combineRgb(255, 255, 255) },
+			defaultStyle: { bgcolor: combineRgb(0, 100, 0), color: combineRgb(255, 255, 255) },
 			options: [
 				{
 					id: 'questionId',
@@ -156,17 +156,26 @@ module.exports = async function (self) {
 			name: 'Any Q&A question is live',
 			type: 'boolean',
 			label: 'Has active question',
-			defaultStyle: { bgcolor: combineRgb(0, 160, 0), color: combineRgb(255, 255, 255) },
+			defaultStyle: { bgcolor: combineRgb(0, 100, 0), color: combineRgb(255, 255, 255) },
 			options: [],
 			callback: () => self.qaQuestions.some((q) => q.isActive === true),
 		},
 		has_cued_question: {
 			name: 'Any Q&A question is cued (next)',
 			type: 'boolean',
-			label: 'Has cued question',
-			defaultStyle: { bgcolor: combineRgb(180, 120, 0), color: combineRgb(255, 255, 255) },
+			label: 'Has cued question (NEXT)',
+			defaultStyle: { bgcolor: combineRgb(148, 0, 211), color: combineRgb(255, 255, 255) },
 			options: [],
 			callback: () => self.qaQuestions.some((q) => q.isNext === true),
+		},
+		has_active_or_cued_question: {
+			name: 'Any Q&A question is ACTIVE (live) or CUE (cued)',
+			type: 'boolean',
+			label: 'Has active or cued question',
+			defaultStyle: { bgcolor: combineRgb(0, 100, 0), color: combineRgb(255, 255, 255) },
+			options: [],
+			callback: () =>
+				self.qaQuestions.some((q) => q.isActive === true || q.isNext === true),
 		},
 	});
 };

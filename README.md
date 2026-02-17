@@ -172,6 +172,19 @@ npm run build
 firebase deploy --only hosting
 ```
 
+## Deploying the live CSV server (Railway)
+
+The **live-csv-server** (Companion API + live CSV endpoints for VMIX/Sheets) runs on [Railway](https://railway.app/). Push to GitHub to deploy:
+
+- Connect your GitHub repo to Railway and set the service **Root Directory** to `live-csv-server` (see the Dockerfile there).
+- **Push to GitHub** → Railway builds and deploys from the `main` branch (or your configured branch). No separate deploy step needed after `git push`.
+
+```bash
+git add .
+git commit -m "Your message"
+git push origin main
+```
+
 ## Project Structure
 
 ```

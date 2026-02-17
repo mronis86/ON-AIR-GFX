@@ -207,7 +207,8 @@ class OnAirGfxInstance extends InstanceBase {
 			'question_cued',
 			'has_active_poll',
 			'has_active_question',
-			'has_cued_question'
+			'has_cued_question',
+			'has_active_or_cued_question'
 		);
 	}
 

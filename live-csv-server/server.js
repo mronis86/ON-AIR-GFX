@@ -279,7 +279,11 @@ app.post('/companion-api/events/:eventId/qa/session/:sessionId/play-next', async
         return data.question && (data.sessionId === sessionId || d.id === sessionId);
       })
       .map((d) => ({ id: d.id, ref: d.ref, data: d.data() }));
-    let questionToPlay = questionsInSession.find((q) => q.data.isNext === true);
+    // Play Cue (isQueued) first — same as web app Play button. Fallback: Next (isNext), then first non-active.
+    let questionToPlay = questionsInSession.find((q) => q.data.isQueued === true);
+    if (!questionToPlay) {
+      questionToPlay = questionsInSession.find((q) => q.data.isNext === true);
+    }
     if (!questionToPlay) {
       questionToPlay = questionsInSession.find((q) => q.data.isActive !== true);
     }
@@ -363,13 +367,21 @@ app.post('/companion-api/events/:eventId/poll/:pollId/public', async (req, res) 
 });
 
 // Must be before /qa/:qaId/public so "stop" is not matched as qaId
+// Stop = set active question to Done, promote Next to Cue, clear live state (same as web app Stop button).
 app.post('/companion-api/events/:eventId/qa/stop', async (req, res) => {
   if (!db) return res.status(500).json({ ok: false, error: 'Database not configured' });
   try {
     const { eventId } = req.params;
+    const now = new Date().toISOString();
     const activeQ = await db.collection(QA).where('eventId', '==', eventId).where('isActive', '==', true).limit(1).get();
     if (!activeQ.empty) {
-      await activeQ.docs[0].ref.update({ isActive: false, updatedAt: new Date().toISOString() });
+      await activeQ.docs[0].ref.update({ isActive: false, isDone: true, updatedAt: now });
+    }
+    // Promote Next to Cue: question with isNext becomes Cue (isNext false, isQueued true)
+    const allQ = await db.collection(QA).where('eventId', '==', eventId).get();
+    const nextDoc = allQ.docs.find((d) => d.data().isNext === true);
+    if (nextDoc) {
+      await nextDoc.ref.update({ isNext: false, isQueued: true, updatedAt: now });
     }
     await db.collection(LIVE_STATE).doc(eventId).set({ activeQA: null, updatedAt: new Date() }, { merge: true });
     res.json({ ok: true });

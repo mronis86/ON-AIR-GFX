@@ -15,9 +15,13 @@ module.exports = function (self) {
 	const gray = combineRgb(80, 80, 80);
 	const white = combineRgb(255, 255, 255);
 	const green = combineRgb(0, 160, 0);
+	const darkGreen = combineRgb(0, 100, 0);
 	const orange = combineRgb(180, 120, 0);
-	const red = combineRgb(180, 60, 60);
+	const purple = combineRgb(148, 0, 211);
+	const teal = combineRgb(0, 140, 120);
+	const blue = combineRgb(50, 100, 200);
 
+	// All preset feedbacks have style.bgcolor set so background changes when feedback is true.
 	// --- Polls - Control: one button per poll, name only, toggle active on/off with feedback ---
 	polls.forEach((p) => {
 		const pid = p.id;
@@ -27,7 +31,7 @@ module.exports = function (self) {
 			category: 'Polls - Control',
 			name,
 			style: { text: name, size: '18', color: white, bgcolor: gray },
-			feedbacks: [{ feedbackId: 'poll_active', options: { pollId: pid } }],
+			feedbacks: [{ feedbackId: 'poll_active', options: { pollId: pid }, style: { bgcolor: green, color: white } }],
 			steps: [
 				{ down: [{ actionId: 'poll_set_active', options: { pollId: pid, active: 'toggle' } }], up: [] },
 			],
@@ -43,7 +47,7 @@ module.exports = function (self) {
 			category: 'Polls - Public',
 			name: `${title} – Toggle public`,
 			style: { text: `Public\n${title}`, size: '18', color: white, bgcolor: gray },
-			feedbacks: [{ feedbackId: 'poll_public', options: { pollId: pid } }],
+			feedbacks: [{ feedbackId: 'poll_public', options: { pollId: pid }, style: { bgcolor: blue, color: white } }],
 			steps: [
 				{ down: [{ actionId: 'poll_toggle_public', options: { pollId: pid } }], up: [] },
 			],
@@ -59,7 +63,7 @@ module.exports = function (self) {
 			category: 'Polls - CSV',
 			name: `CSV: ${name}`,
 			style: { text: `CSV\n${name}`, size: '18', color: white, bgcolor: gray },
-			feedbacks: [{ feedbackId: 'poll_csv_source', options: { pollId: pid } }],
+			feedbacks: [{ feedbackId: 'poll_csv_source', options: { pollId: pid }, style: { bgcolor: teal, color: white } }],
 			steps: [
 				{ down: [{ actionId: 'poll_toggle_csv_source', options: { pollId: pid } }], up: [] },
 			],
@@ -75,7 +79,7 @@ module.exports = function (self) {
 			category: 'Q&A - Control',
 			name,
 			style: { text: name, size: '18', color: white, bgcolor: gray },
-			feedbacks: [{ feedbackId: 'has_active_question', options: {} }],
+			feedbacks: [{ feedbackId: 'has_active_question', options: {}, style: { bgcolor: darkGreen, color: white } }],
 			steps: [
 				{ down: [{ actionId: 'qa_session_set_active', options: { qaId: qid, active: 'toggle' } }], up: [] },
 			],
@@ -91,7 +95,7 @@ module.exports = function (self) {
 			category: 'Q&A - Public',
 			name: `${name} – Toggle public`,
 			style: { text: `Public\n${name}`, size: '18', color: white, bgcolor: gray },
-			feedbacks: [{ feedbackId: 'qa_session_public', options: { qaId: qid } }],
+			feedbacks: [{ feedbackId: 'qa_session_public', options: { qaId: qid }, style: { bgcolor: purple, color: white } }],
 			steps: [
 				{ down: [{ actionId: 'qa_session_set_public', options: { qaId: qid, public: 'toggle' } }], up: [] },
 			],
@@ -107,28 +111,31 @@ module.exports = function (self) {
 			category: 'Q&A - CSV',
 			name: `CSV: ${name}`,
 			style: { text: `CSV\n${name}`, size: '18', color: white, bgcolor: gray },
-			feedbacks: [{ feedbackId: 'qa_session_csv_source', options: { qaId: qid } }],
+			feedbacks: [{ feedbackId: 'qa_session_csv_source', options: { qaId: qid }, style: { bgcolor: teal, color: white } }],
 			steps: [
 				{ down: [{ actionId: 'qa_session_set_csv_source', options: { qaId: qid, mode: 'toggle' } }], up: [] },
 			],
 		};
 	});
 
-	// --- Q&A - Question states: two buttons — ACTIVE (live) and CUE (next up), background color by feedback ---
-	presets.qa_state_active = {
+	// --- Q&A - Question states: ACTIVE/CUE = two feedbacks (dark green when active, orange when cued). NEXT = purple. ---
+	presets.qa_state_active_cue = {
 		type: 'button',
 		category: 'Q&A - Question states',
-		name: 'ACTIVE',
-		style: { text: 'ACTIVE', size: '18', color: white, bgcolor: gray },
-		feedbacks: [{ feedbackId: 'has_active_question', options: {} }],
+		name: 'ACTIVE/CUE',
+		style: { text: 'ACTIVE/CUE', size: '18', color: white, bgcolor: gray },
+		feedbacks: [
+			{ feedbackId: 'has_active_question', options: {}, style: { bgcolor: darkGreen, color: white } },
+			{ feedbackId: 'has_cued_question', options: {}, style: { bgcolor: orange, color: white } },
+		],
 		steps: [{ down: [], up: [] }],
 	};
-	presets.qa_state_cue = {
+	presets.qa_state_next = {
 		type: 'button',
 		category: 'Q&A - Question states',
-		name: 'CUE',
-		style: { text: 'CUE', size: '18', color: white, bgcolor: gray },
-		feedbacks: [{ feedbackId: 'has_cued_question', options: {} }],
+		name: 'NEXT',
+		style: { text: 'NEXT', size: '18', color: white, bgcolor: gray },
+		feedbacks: [{ feedbackId: 'has_cued_question', options: {}, style: { bgcolor: purple, color: white } }],
 		steps: [{ down: [], up: [] }],
 	};
 
